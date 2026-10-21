@@ -1,0 +1,1 @@
+{ "name": "session-manager", "version": "0.1.0", "description": "A clickable pane listing every Claude Code session on this machine, searchable by title and content, with one-click resume", "types": "./types/index.d.ts" }
