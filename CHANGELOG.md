@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1
+
+### session-manager
+- **Windows 不用裝 Python**：找不到可用的 Python 時（常見的是只有 Microsoft Store 的捷徑），改用 PowerShell 版的 scanner（`hooks/scanner.ps1`）。列表、搜尋、改名、刪除、Resume、新增、瀏覽都能用。
+- **修正**：「開始」「瀏覽…」「Resume」「改名」「刪除」失敗時不再沒有反應，狀態列會顯示原因。
+- **修正**：新 session 的資料夾欄位不再自動搶走鍵盤焦點，`s` 開始、`b` 瀏覽、`q` 取消可以直接按；要打字時用 Tab 或點欄位。
+- 「瀏覽…」的資料夾視窗固定在最上層，不會開在終端機後面。
+
 ## 0.2.0
 
 ### session-manager

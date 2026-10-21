@@ -120,3 +120,44 @@ test('on Windows: falls back to python, copies a PowerShell command, opens Windo
   expect(calls.find(c => c[1] === 'open')).toEqual(['python', 'open', 'Windows Terminal', "C:\\Users\\amy\\it's here", 'claude --resume w1'])
   await ui.unmount()
 })
+
+test('on Windows with no Python: runs scanner.ps1, and a failed press says why', async ($, on) => {
+  const calls: string[][] = []
+  on('command.register', () => ({ value: { command: 'sessions' } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('session.id', () => ({ value: 'me' }))
+  const clock = mock.clock(on)
+  mock.store(on)
+  on('process.run', (_, e) => {
+    calls.push([...e.argv])
+    // Every Python here is the Store stub, which exits 9009 and runs nothing.
+    if (e.argv[0] !== 'powershell') {
+      return { value: { exitCode: 9009, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
+    const args = e.argv.slice(e.argv.findIndex(a => a.endsWith('scanner.ps1')) + 1)
+    if (args[0] === 'pickdir') {
+      return { value: { exitCode: 1, stdout: '', stderr: 'Exception calling "ShowDialog"', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
+    const out = args[0] === 'index'
+      ? { rows: [ROW('w1', 'Win work', 'C:\work')], live: {}, platform: 'win', apps: ['Windows Terminal'] }
+      : { ok: true, msg: '' }
+    return { value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+
+  await $.session.start({ cwd: 'C:\work', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+
+  expect(await ui.find({ type: 'Text', text: /1 sessions · 1 資料夾/ })).toBeDefined()
+  const ps = calls.find(c => c[0] === 'powershell')
+  expect(ps?.slice(-3)).toEqual(['index', '~/.claude/projects', '~/.claude/session-manager/index.json'])
+  expect(ps?.at(-4)).toMatch(/hooks[\/]scanner\.ps1$/)
+
+  await ui.press({ key: 'new' })
+  await ui.press({ key: 'browse' })
+  expect(await ui.find({ type: 'Text', text: /瀏覽失敗：Exception calling "ShowDialog"/ })).toBeDefined()
+  await ui.press({ key: 'start' })
+  expect(calls.at(-1)?.slice(-4)).toEqual(['open', 'Windows Terminal', 'C:\work', 'claude'])
+  await ui.unmount()
+})

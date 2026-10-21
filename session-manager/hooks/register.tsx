@@ -61,22 +61,34 @@ type Done = { ok: boolean; msg?: string; path?: string }
 
 // Windows often has `python` or the `py` launcher and no `python3` (or a Store
 // stub of it that exits without running anything): the first that runs wins.
+// With no Python at all, Windows runs scanner.ps1, the same modes in PowerShell.
 const PYTHONS = [['python3'], ['python'], ['py', '-3']]
-let pythonArgv: string[] | undefined
+let scannerArgv: string[] | undefined
+
+const powershell = ($: EngineInterface) =>
+  ['powershell', '-NoProfile', '-NonInteractive', '-STA', '-ExecutionPolicy', 'Bypass', '-File', `${$.plugin.root}/hooks/scanner.ps1`]
 
 async function python<T>($: EngineInterface, args: string[]): Promise<T> {
-  for (const argv of pythonArgv ? [pythonArgv] : PYTHONS) {
+  const tried = scannerArgv ? [scannerArgv] : [...PYTHONS.map(argv => [...argv, '-I', '-']), powershell($)]
+  for (const argv of tried) {
+    const isPython = argv.at(-1) === '-'
     const ran = await $.process
-      .run([...argv, '-I', '-', ...args], { stdin: SCANNER, timeoutMs: 120_000 })
+      .run([...argv, ...args], isPython ? { stdin: SCANNER, timeoutMs: 120_000 } : { timeoutMs: 120_000 })
       .catch(() => undefined)
     if (ran?.exitCode === 0) {
-      pythonArgv = argv
+      scannerArgv = argv
       return JSON.parse(ran.stdout) as T
     }
     if (ran?.stderr.includes('Traceback')) throw new Error(ran.stderr.trim().split('\n').pop())
+    // PowerShell ran but the script failed: its first line says why.
+    if (ran && !isPython) throw new Error(ran.stderr.trim().split('\n')[0] || `PowerShell exit ${ran.exitCode}`)
   }
-  throw new Error('找不到可用的 Python（試過 python3、python、py -3）')
+  throw new Error('找不到可用的 Python（試過 python3、python、py -3），也沒有 PowerShell')
 }
+
+// A failed run says so on the status line instead of leaving the press unanswered.
+const attempt = ($: EngineInterface, what: string, work: () => Promise<unknown>) =>
+  void work().catch(err => say($, `${what}失敗：${err instanceof Error ? err.message : String(err)}`))
 
 async function setView($: EngineInterface, patch: Partial<View>) {
   await update($, view, v => ({ ...v, ...patch }))
@@ -160,6 +172,13 @@ async function startNew($: EngineInterface, dir: string) {
   await setView($, { mode: null })
   await say($, done.ok ? `已在 ${app} 的 ${tilde(path)} 開新 session` : `${app} 開啟失敗：${done.msg}`)
   $.clock.after(6000, () => void refresh($, true))
+}
+
+async function pickDir($: EngineInterface) {
+  await setView($, { busy: '等你選資料夾…', note: null })
+  const done = await python<Done>($, ['pickdir'])
+  if (done.ok && done.path) await setView($, { mode: { kind: 'new', dir: tilde(done.path) } })
+  await setView($, { busy: null })
 }
 
 async function rename($: EngineInterface, row: SessionRow, title: string) {
@@ -265,20 +284,20 @@ export const register: Register = on => {
           {mode?.kind === 'rename' && mode.id === row.id && Input ? (
             <Box flexDirection="column">
               <Input key={`rename-${row.id}`} label="新名稱 " value={row.title} autoFocus submitLabel="改名"
-                onInput={() => {}} onSubmit={(value: string) => void rename($, row, value)} />
+                onInput={() => {}} onSubmit={(value: string) => attempt($, '改名', () => rename($, row, value))} />
               <Button key="cancel" label="取消" hotkey="q" plain onPress={() => void setView($, { mode: null })} />
             </Box>
           ) : mode?.kind === 'delete' && mode.id === row.id ? (
             <Box flexDirection="row" gap={1} flexWrap="wrap">
               <Text color="error">移到垃圾桶？</Text>
-              <Button key="confirm" label="確定刪除" hotkey="y" variant="primary" onPress={() => void remove($, row)} />
+              <Button key="confirm" label="確定刪除" hotkey="y" variant="primary" onPress={() => attempt($, '刪除', () => remove($, row))} />
               <Button key="cancel" label="取消" hotkey="q" onPress={() => void setView($, { mode: null })} />
             </Box>
           ) : (
             <Box flexDirection="row" gap={1} flexWrap="wrap">
               {!isMe && (
                 <Button key={`jump-${row.id}`} label={info ? '跳過去' : 'Resume'} hotkey="t" variant="primary"
-                  onPress={() => void jump($, row)} />
+                  onPress={() => attempt($, info ? '切換' : 'Resume', () => jump($, row))} />
               )}
               <Button key={`rename-btn-${row.id}`} label="改名" hotkey="e"
                 onPress={() => void setView($, { mode: { kind: 'rename', id: row.id } })} />
@@ -331,9 +350,9 @@ export const register: Register = on => {
           <Box flexDirection="column" borderStyle="round" borderColor="claude" paddingX={1}>
             <Text bold color="claude">新 SESSION</Text>
             {Input && (
-              <Input key="newdir" label="資料夾 " value={mode.dir} autoFocus submitLabel="開始"
+              <Input key="newdir" label="資料夾 " value={mode.dir} submitLabel="開始"
                 onInput={(value: string) => void setView($, { mode: { kind: 'new', dir: value } })}
-                onSubmit={(value: string) => void startNew($, value)} />
+                onSubmit={(value: string) => attempt($, '開新 session', () => startNew($, value))} />
             )}
             <Text color="subtle">{'┄'.repeat(inner)}</Text>
             <Text dimColor>最近的資料夾</Text>
@@ -345,12 +364,9 @@ export const register: Register = on => {
             ))}
             <Text color="subtle">{'┄'.repeat(inner)}</Text>
             <Box flexDirection="row" gap={1} flexWrap="wrap">
-              <Button key="start" label={`在 ${app} 開始`} hotkey="s" variant="primary" onPress={() => void startNew($, mode.dir)} />
+              <Button key="start" label={`在 ${app} 開始`} hotkey="s" variant="primary" onPress={() => attempt($, '開新 session', () => startNew($, mode.dir))} />
               <Button key="browse" label="瀏覽…" hotkey="b"
-                onPress={() =>
-                  void python<Done>($, ['pickdir']).then(done =>
-                    done.ok && done.path ? setView($, { mode: { kind: 'new', dir: tilde(done.path) } }) : undefined)
-                } />
+                onPress={() => attempt($, '瀏覽', () => pickDir($))} />
               <Button key="cancel-new" label="取消" hotkey="q" onPress={() => void setView($, { mode: null })} />
             </Box>
           </Box>

@@ -14,7 +14,7 @@ Claude Code 的兩個 mod（hooks-module plugin），都會在對話旁邊開一
 - **+ 新增**：選資料夾開新 session
 - 指令：`/sessions`
 
-需求：Python 3（用來讀超過 4MB 的 transcript；依序試 `python3`、`python`、`py -3`）。
+需求：Python 3（用來讀超過 4MB 的 transcript；依序試 `python3`、`python`、`py -3`）。Windows 沒有 Python 時改用內建的 PowerShell 跑同樣的功能，不用另外安裝。
 
 | | macOS | Windows |
 | --- | --- | --- |

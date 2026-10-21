@@ -1,1 +1,1 @@
-{ "name": "session-manager", "version": "0.2.0", "description": "A clickable pane listing every Claude Code session on this machine (macOS and Windows): search titles and content, resume, jump to an open one, rename, start and delete", "types": "./types/index.d.ts" }
+{ "name": "session-manager", "version": "0.2.1", "description": "A clickable pane listing every Claude Code session on this machine (macOS and Windows): search titles and content, resume, jump to an open one, rename, start and delete", "types": "./types/index.d.ts" }

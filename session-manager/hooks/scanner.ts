@@ -305,10 +305,12 @@ def focus(app, tty):
 
 def pickdir():
     if WIN:
+        # An unseen, topmost owner keeps the dialog in front of the terminal.
         ok, msg = powershell("Add-Type -AssemblyName System.Windows.Forms; "
+                             "$o = New-Object System.Windows.Forms.Form -Property @{TopMost=$true; ShowInTaskbar=$false}; "
                              "$d = New-Object System.Windows.Forms.FolderBrowserDialog; "
                              "$d.Description = 'Folder for the new session'; "
-                             "if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath }")
+                             "if ($d.ShowDialog($o) -eq 'OK') { $d.SelectedPath }")
         ok = ok and bool(msg)
     else:
         ok, msg = osa(['POSIX path of (choose folder with prompt "Folder for the new session")'])
