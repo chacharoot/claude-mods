@@ -22,6 +22,9 @@ export type LiveInfo = {
   app: string
 }
 
+// Where the scanner runs, and the terminal apps it can open a session in.
+export type Host = { platform: 'mac' | 'win'; apps: string[] }
+
 export type ContentHit = { id: string; hits: number; snippet: string }
 
 export type Mode =
@@ -48,6 +51,7 @@ declare module 'claude-code' {
       view: View
       current: string
       app: string
+      host: Host
     }
   }
 }

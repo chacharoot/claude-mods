@@ -2,33 +2,13 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { AgentCard } from '../types'
+import { bodyColor, critter, hex, SPRITE_COLS, SPRITE_ROWS } from './sprite'
 
 const PANE = 'agent-zoo'
 const TITLE = 'Agent Zoo'
 const agents = atom({ plugin: 'agent-zoo', key: 'agents' } as const, [])
 const tick = atom({ plugin: 'agent-zoo', key: 'tick' } as const, 0)
 
-// Two-line critters: a face and its legs, one frame list per status, every
-// cell SPRITE_W wide so the columns line up.
-const SPRITE_W = 7
-const SPRITES: Record<AgentCard['status'], [string, string][]> = {
-  running: [
-    [' (o_o) ', '  /|   '],
-    [' (o_o)>', '  |\\   '],
-    ['<(o_o) ', '  /|   '],
-    [' (o_o) ', '  |\\   '],
-  ],
-  waiting: [
-    [' (-_-) ', ' z     '],
-    [' (-_-) ', '  zZ   '],
-  ],
-  done: [[' (^_^)b', '  ||   ']],
-  failed: [[' (x_x) ', '  ..   ']],
-  killed: [[' (+_+) ', '  ..   ']],
-}
-// How far a running critter strolls, in cells, frame by frame.
-const STROLL = [0, 1, 2, 3, 2, 1]
-const WALK_W = SPRITE_W + Math.max(...STROLL)
 const STALE_MS = 60_000
 
 const COLOR: Record<AgentCard['status'], string> = {
@@ -39,14 +19,6 @@ const COLOR: Record<AgentCard['status'], string> = {
   killed: 'inactive',
 }
 
-// Each agent type gets a hat so they read apart at a glance.
-const HAT: Record<string, string> = {
-  Explore: '[?]',
-  Plan: '[#]',
-  'general-purpose': '[*]',
-  fork: '[Y]',
-  'claude-code-guide': '[i]',
-}
 const ORDER: Record<AgentCard['status'], number> = { running: 0, waiting: 1, failed: 2, killed: 2, done: 3 }
 const isLive = (card: AgentCard) => card.status === 'running' || card.status === 'waiting'
 // A phase of its own per critter, so they do not march in step.
@@ -54,8 +26,20 @@ const phase = (id: string) => [...id].reduce((n, ch) => n + ch.charCodeAt(0), 0)
 
 let timer: Timer | undefined
 
-const clip = (text: string, max: number) =>
-  text.length > max ? `${text.slice(0, max - 1)}…` : text
+// Terminal cells a string takes: CJK and emoji are two wide.
+const WIDE = /[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6]|[\ud800-\udbff]/
+const cells = (s: string) => [...s].reduce((n, ch) => n + (WIDE.test(ch) ? 2 : 1), 0)
+
+function clip(text: string, width: number) {
+  if (cells(text) <= width) return text
+  let out = ''
+  for (const ch of text) {
+    if (cells(out + ch) > width - 1) break
+    out += ch
+  }
+  return `${out}…`
+}
+const pad = (text: string, width: number) => text + ' '.repeat(Math.max(0, width - cells(text)))
 
 const base = (path: unknown) => String(path ?? '').split('/').pop() ?? ''
 
@@ -195,72 +179,96 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text } = $.ui.resolve(e)
+    const els = $.ui.resolve(e)
+    const { Box, Text } = els
+    // Pixels on the terminal only; elsewhere the column stays blank.
+    const Raster = 'Raster' in els ? els.Raster : undefined
     const list = await read($, agents)
     const frame = await read($, tick)
     const now = await $.clock.now()
-    const width = Math.max(20, (e.props.bodyColumns ?? e.viewport?.columns ?? 40) - WALK_W - 2)
+    const W = Math.max(30, (e.props.bodyColumns ?? e.viewport?.columns ?? 48) - 1)
+    const info = W - SPRITE_COLS - 2
+    const rule = <Text color="subtle">{'─'.repeat(W)}</Text>
     const count = (status: AgentCard['status']) => list.filter(card => card.status === status).length
     const summary = [
-      [count('running'), 'running'],
-      [count('waiting'), 'waiting'],
-      [count('failed') + count('killed'), 'failed'],
-      [count('done'), 'done'],
-    ]
-      .filter(([n]) => n)
-      .map(([n, label]) => `${n} ${label}`)
-      .join(' · ')
+      [count('running'), 'running', COLOR.running],
+      [count('waiting'), 'waiting', COLOR.waiting],
+      [count('failed') + count('killed'), 'failed', COLOR.failed],
+      [count('done'), 'done', COLOR.done],
+    ].filter(([n]) => n) as [number, string, string][]
+
+    const bot = (key: string, type: string, status: AgentCard['status'], step: number) =>
+      Raster ? (
+        <Raster key={key} columns={SPRITE_COLS} rows={SPRITE_ROWS} cells={critter(type, status, step)} />
+      ) : (
+        <Box width={SPRITE_COLS} />
+      )
+
+    const header = (
+      <Box flexDirection="column">
+        <Text>
+          <Text bold color="claude">AGENT ZOO</Text>
+          {summary.length === 0 && <Text dimColor>{'  idle'}</Text>}
+          {summary.map(([n, label, color]) => (
+            <Text color={color}>{`  ● ${n} ${label}`}</Text>
+          ))}
+        </Text>
+        {rule}
+      </Box>
+    )
 
     if (list.length === 0) {
       return (
         <Box flexDirection="column">
-          <Text dimColor>{' (._.) '}</Text>
-          <Text dimColor>No sub-agents yet. They show up here when spawned.</Text>
+          {header}
+          <Box flexDirection="row" gap={2} marginTop={1}>
+            {bot('bot-empty', 'other', 'waiting', frame)}
+            <Box flexDirection="column" justifyContent="center">
+              <Text dimColor>還沒有 sub-agent。</Text>
+              <Text dimColor>有 agent 被叫起來時，會出現在這裡。</Text>
+            </Box>
+          </Box>
         </Box>
       )
     }
 
-    // Live agents first, newest first within a status; as many as fit (4 rows each).
-    const room = Math.max(1, Math.floor(((e.viewport?.rows ?? 24) - 3) / 4))
+    // Live agents first, newest first within a status; as many as fit.
+    const room = Math.max(1, Math.floor(((e.viewport?.rows ?? 30) - 3) / (SPRITE_ROWS + 1)))
     const sorted = [...list].sort((a, b) => ORDER[a.status] - ORDER[b.status] || b.startedAt - a.startedAt)
     const shown = sorted.slice(0, room)
 
     return (
       <Box flexDirection="column">
-        <Text dimColor>{summary}</Text>
-        {shown.map(card => {
-          const frames = SPRITES[card.status]
-          const step = frame + phase(card.id)
-          const [face, legs] = frames[step % frames.length] ?? frames[0]!
-          const hat = HAT[card.type] ?? '[ ]'
-          const pad = ' '.repeat(card.status === 'running' ? STROLL[step % STROLL.length] ?? 0 : 0)
+        {header}
+        {shown.map((card, i) => {
           const quiet = (card.endedAt ?? now) - card.lastToolAt
           const isStale = card.status === 'running' && quiet > STALE_MS
+          const color = hex(bodyColor(card.type))
+          const chip = `● ${card.status}`
           return (
-            <Box key={card.id} flexDirection="row" gap={1} marginTop={1}>
-              <Box flexDirection="column" width={WALK_W}>
-                <Text color={COLOR[card.status]}>{`${pad}  ${hat}`}</Text>
-                <Text color={COLOR[card.status]}>{pad + face}</Text>
-                <Text color={COLOR[card.status]}>{pad + legs}</Text>
-              </Box>
-              <Box flexDirection="column" flexShrink={1}>
-                <Text>
-                  <Text bold color={COLOR[card.status]}>
-                    {card.type}
+            <Box key={card.id} flexDirection="column">
+              <Box flexDirection="row" gap={2}>
+                {bot(`bot-${card.id}`, card.type, card.status, frame + phase(card.id))}
+                <Box flexDirection="column" width={info}>
+                  <Text> </Text>
+                  <Text>
+                    <Text bold color={color}>{pad(clip(card.type, info - cells(chip) - 1), info - cells(chip))}</Text>
+                    <Text color={COLOR[card.status]}>{chip}</Text>
                   </Text>
                   <Text dimColor>
-                    {' '}
-                    {card.status} · {elapsed((card.endedAt ?? now) - card.startedAt)} ·{' '}
-                    {card.toolCount} tools
+                    {clip(`${elapsed((card.endedAt ?? now) - card.startedAt)} · ${card.toolCount} tools${card.model ? ` · ${card.model}` : ''}`, info)}
                   </Text>
-                  {isStale && <Text color="warning">{` · idle ${elapsed(quiet)}`}</Text>}
-                </Text>
-                <Text>{clip(card.description || '(no description)', width)}</Text>
-                <Text dimColor>{clip(card.activity ?? '…', width)}</Text>
+                  <Text color="subtle">{'┄'.repeat(Math.min(info, 24))}</Text>
+                  <Text bold>{clip(card.description || '(no description)', info)}</Text>
+                  <Text dimColor>{clip(`› ${card.activity ?? '…'}`, info)}</Text>
+                  {isStale && <Text color="warning">{clip(`⚠ ${elapsed(quiet)} 沒有動作，可能卡住了`, info)}</Text>}
+                </Box>
               </Box>
+              {i < shown.length - 1 && <Text color="subtle">{'┈'.repeat(W)}</Text>}
             </Box>
           )
         })}
+        {rule}
         {list.length > shown.length && <Text dimColor>{`+${list.length - shown.length} more`}</Text>}
       </Box>
     )

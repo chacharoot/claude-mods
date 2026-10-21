@@ -1,16 +1,19 @@
 {
   "name": "claude-mods",
-  "owner": { "name": "chacharoot" },
+  "owner": {
+    "name": "chacharoot"
+  },
   "plugins": [
     {
       "name": "session-manager",
       "source": "./session-manager",
-      "description": "A clickable pane listing every Claude Code session on this machine: search titles and content, resume, jump to an open one, rename, start and delete"
+      "description": "A clickable pane listing every Claude Code session on this machine (macOS and Windows): search titles and content, resume, jump to an open one, rename, start and delete"
     },
     {
       "name": "agent-zoo",
       "source": "./agent-zoo",
-      "description": "A pane that shows each sub-agent as a little animated critter: who runs, its status and what it is doing"
+      "description": "A pane that shows each sub-agent as a shaded 3D pixel robot: who runs, its status and what it is doing"
     }
-  ]
+  ],
+  "description": "Claude Code mods: a session manager pane and an animated sub-agent pane"
 }

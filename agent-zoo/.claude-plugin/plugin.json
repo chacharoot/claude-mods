@@ -1,1 +1,1 @@
-{ "name": "agent-zoo", "version": "0.1.0", "description": "A pane beside the chat that shows each sub-agent as a little animated critter: who runs, its status and what it is doing", "types": "./types/index.d.ts" }
+{ "name": "agent-zoo", "version": "0.2.0", "description": "A pane beside the chat that shows each sub-agent as a shaded 3D pixel robot: who runs, its status and what it is doing", "types": "./types/index.d.ts" }

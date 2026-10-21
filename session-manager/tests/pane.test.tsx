@@ -39,6 +39,8 @@ test('groups, searches, renames, deletes and starts sessions', async ($, on) => 
             rows: [ROW('me', 'This one', '/work/a'), ROW('s2', 'Raiden game', "/work/b's dir"), ROW('s3', 'Fly brain', '/work/a')],
             live: { me: { pid: 1, tty: '/dev/ttys001', status: 'idle', kind: 'interactive', name: 'a', app: 'Warp' },
                     s3: { pid: 2, tty: '/dev/ttys002', status: 'busy', kind: 'interactive', name: 'fly', app: 'Warp' } },
+            platform: 'mac',
+            apps: ['Warp', 'Terminal'],
           }
         : args[0] === 'search'
           ? [{ id: 's3', hits: 2, snippet: 'LIF neurons here' }]
@@ -50,7 +52,7 @@ test('groups, searches, renames, deletes and starts sessions', async ($, on) => 
   await clock.settle()
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
 
-  expect(await ui.find({ type: 'Text', text: /3 · 2 資料夾/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /3 sessions · 2 資料夾/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /~?\/work\/a/ })).toBeDefined()
 
   await ui.input({ key: 'query', text: 'neurons' })
@@ -80,5 +82,41 @@ test('groups, searches, renames, deletes and starts sessions', async ($, on) => 
   await ui.press({ key: 'new' })
   await ui.input({ key: 'newdir', text: '/work/new' })
   expect(calls.find(c => c[0] === 'open' && c[3] === 'claude')).toEqual(['open', 'Warp', '/work/new', 'claude'])
+  await ui.unmount()
+})
+
+test('on Windows: falls back to python, copies a PowerShell command, opens Windows Terminal', async ($, on) => {
+  const copied: string[] = []
+  const calls: string[][] = []
+  on('command.register', () => ({ value: { command: 'sessions' } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('session.id', () => ({ value: 'me' }))
+  const clock = mock.clock(on)
+  mock.store(on)
+  on('ui.copy', (_, e) => (copied.push(e.text), { value: { isCopied: true } }))
+  on('process.run', (_, e) => {
+    calls.push([...e.argv.slice(0, 1), ...e.argv.slice(3)])
+    // No python3 here, as on many Windows machines: the Store stub exits 9009.
+    if (e.argv[0] === 'python3') {
+      return { value: { exitCode: 9009, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
+    const args = e.argv.slice(3)
+    const out = args[0] === 'index'
+      ? { rows: [ROW('w1', 'Win work', "C:\\Users\\amy\\it's here")], live: {}, platform: 'win', apps: ['Windows Terminal'] }
+      : { ok: true, msg: '' }
+    return { value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+
+  await $.session.start({ cwd: 'C:\\Users\\amy', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+
+  expect(await ui.find({ type: 'Text', text: /~\\it's here/ })).toBeDefined()
+  await ui.press({ key: 'row-w1' })
+  await ui.press({ key: 'copy-w1' })
+  expect(copied).toEqual([`cd 'C:\\Users\\amy\\it''s here'; claude --resume w1`])
+  await ui.press({ key: 'jump-w1' })
+  expect(calls.find(c => c[1] === 'open')).toEqual(['python', 'open', 'Windows Terminal', "C:\\Users\\amy\\it's here", 'claude --resume w1'])
   await ui.unmount()
 })

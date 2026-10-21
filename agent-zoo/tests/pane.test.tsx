@@ -40,7 +40,7 @@ test('a spawned agent shows its tool, and a late tool call does not revive it', 
 
   let ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect((await ui.find({ type: 'Text', text: /Find the config/ }))?.text).toBe('Find the config')
-  expect((await ui.find({ type: 'Text', text: /Read config\.json/ }))?.text).toBe('Read config.json')
+  expect((await ui.find({ type: 'Text', text: /Read config\.json/ }))?.text).toBe('› Read config.json')
   await ui.unmount()
 
   await $.turn.complete({ answer: 'found it', durationMs: 1, isAborted: false, turnId: 'x', agentId: 'a1', reason: 'answer' })

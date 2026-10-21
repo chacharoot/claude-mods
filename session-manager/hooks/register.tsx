@@ -1,14 +1,13 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { ContentHit, LiveInfo, Mode, SessionRow, View } from '../types'
+import type { ContentHit, Host, LiveInfo, Mode, SessionRow, View } from '../types'
 import { SCANNER } from './scanner'
 
 const PANE = 'session-manager'
 const TITLE = 'Sessions'
 const PROJECTS = '~/.claude/projects'
 const CACHE = '~/.claude/session-manager/index.json'
-const APPS = ['Warp', 'iTerm', 'Terminal']
 const LIMIT = 80
 const POLL_MS = 20_000
 
@@ -18,6 +17,7 @@ const live = atom({ plugin: 'session-manager', key: 'live' } as const, {})
 const view = atom({ plugin: 'session-manager', key: 'view' } as const, EMPTY)
 const current = atom({ plugin: 'session-manager', key: 'current' } as const, '')
 const appPref = atom({ plugin: 'session-manager', key: 'app' } as const, '')
+const host = atom({ plugin: 'session-manager', key: 'host' } as const, { platform: 'mac', apps: ['Terminal'] } as Host)
 
 // Terminal cells a string takes: CJK and emoji are two wide.
 const WIDE = /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]|[\ud800-\udbff]/
@@ -34,7 +34,7 @@ function fit(s: string, width: number) {
 }
 const clip = (s: string, width: number) => fit(s, width).trimEnd()
 
-const tilde = (path: string) => path.replace(/^\/(Users|home)\/[^/]+/, '~')
+const tilde = (path: string) => path.replace(/^\/(Users|home)\/[^/]+|^[A-Za-z]:\\Users\\[^\\]+/, '~')
 
 function age(ms: number) {
   const m = Math.floor(ms / 60000)
@@ -49,18 +49,33 @@ function age(ms: number) {
 const sizeOf = (bytes: number) =>
   bytes > 1 << 20 ? `${(bytes / (1 << 20)).toFixed(1)}MB` : `${Math.ceil(bytes / 1024)}KB`
 
+// What to paste into the person's shell: a POSIX one, or PowerShell on Windows.
 const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
-const resumeCommand = (row: SessionRow) => `cd ${shq(row.cwd)} && claude --resume ${row.id}`
+const psq = (s: string) => `'${s.replace(/'/g, `''`)}'`
+const resumeCommand = (row: SessionRow, platform: Host['platform']) =>
+  platform === 'win'
+    ? `cd ${psq(row.cwd)}; claude --resume ${row.id}`
+    : `cd ${shq(row.cwd)} && claude --resume ${row.id}`
 
 type Done = { ok: boolean; msg?: string; path?: string }
 
+// Windows often has `python` or the `py` launcher and no `python3` (or a Store
+// stub of it that exits without running anything): the first that runs wins.
+const PYTHONS = [['python3'], ['python'], ['py', '-3']]
+let pythonArgv: string[] | undefined
+
 async function python<T>($: EngineInterface, args: string[]): Promise<T> {
-  const ran = await $.process.run(['python3', '-I', '-', ...args], {
-    stdin: SCANNER,
-    timeoutMs: 120_000,
-  })
-  if (ran.exitCode !== 0) throw new Error(ran.stderr.trim().split('\n').pop() || 'scan failed')
-  return JSON.parse(ran.stdout) as T
+  for (const argv of pythonArgv ? [pythonArgv] : PYTHONS) {
+    const ran = await $.process
+      .run([...argv, '-I', '-', ...args], { stdin: SCANNER, timeoutMs: 120_000 })
+      .catch(() => undefined)
+    if (ran?.exitCode === 0) {
+      pythonArgv = argv
+      return JSON.parse(ran.stdout) as T
+    }
+    if (ran?.stderr.includes('Traceback')) throw new Error(ran.stderr.trim().split('\n').pop())
+  }
+  throw new Error('找不到可用的 Python（試過 python3、python、py -3）')
 }
 
 async function setView($: EngineInterface, patch: Partial<View>) {
@@ -71,13 +86,14 @@ const say = ($: EngineInterface, note: string) => setView($, { busy: null, note 
 async function refresh($: EngineInterface, quiet = false) {
   if (!quiet) await setView($, { busy: '索引中…', note: null })
   try {
-    const found = await python<{ rows: SessionRow[]; live: Record<string, LiveInfo> }>($, [
+    const found = await python<{ rows: SessionRow[]; live: Record<string, LiveInfo> } & Host>($, [
       'index',
       PROJECTS,
       CACHE,
     ])
     await update($, sessions, () => found.rows)
     await update($, live, () => found.live)
+    await update($, host, () => ({ platform: found.platform ?? 'mac', apps: found.apps?.length ? found.apps : ['Terminal'] }))
     if (!quiet) await setView($, { busy: null })
   } catch (err) {
     await say($, `索引失敗：${String(err)}`)
@@ -102,14 +118,16 @@ async function searchContent($: EngineInterface, query: string) {
 
 async function chosenApp($: EngineInterface) {
   const pref = await read($, appPref)
-  if (pref) return pref
+  const { apps } = await read($, host)
+  if (pref && apps.includes(pref)) return pref
   const me = (await read($, live))[await read($, current)]
-  return me?.app || 'Terminal'
+  return me?.app && apps.includes(me.app) ? me.app : apps[0] ?? 'Terminal'
 }
 
 async function cycleApp($: EngineInterface) {
+  const { apps } = await read($, host)
   const now = await chosenApp($)
-  const next = APPS[(APPS.indexOf(now) + 1) % APPS.length] ?? 'Terminal'
+  const next = apps[(apps.indexOf(now) + 1) % apps.length] ?? now
   await update($, appPref, () => next)
   await $.store.set('app', next)
 }
@@ -120,9 +138,10 @@ async function jump($: EngineInterface, row: SessionRow) {
   if (info) {
     const app = info.app || (await chosenApp($))
     const done = await python<Done>($, ['focus', app, info.tty])
-    const where = info.name ? `分頁「${info.name}」` : info.tty
-    return say($, done.ok && done.msg !== 'app-only'
-      ? `已切到 ${app} 的 ${where}`
+    const where = info.name ? `分頁「${info.name}」` : info.tty || `pid ${info.pid}`
+    if (done.ok && done.msg !== 'app-only') return say($, `已切到 ${app} 的 ${where}`)
+    return say($, (await read($, host)).platform === 'win'
+      ? `它已經在 ${app} 開著（${where}），請切到那個分頁；${app} 不讓外部選分頁`
       : `已叫出 ${app}，它在 ${where}（${app} 不支援直接選分頁）`)
   }
   const app = await chosenApp($)
@@ -133,8 +152,9 @@ async function jump($: EngineInterface, row: SessionRow) {
 }
 
 async function startNew($: EngineInterface, dir: string) {
-  const path = dir.trim().replace(/^~(?=\/|$)/, (await $.process.run(['sh', '-c', 'printf %s "$HOME"'])).stdout)
-  if (!path || !(await $.fs.exists(path))) return say($, `找不到資料夾：${dir}`)
+  // The scanner expands `~` and checks the folder, on either platform.
+  const path = dir.trim()
+  if (!path) return say($, '請輸入資料夾')
   const app = await chosenApp($)
   const done = await python<Done>($, ['open', app, path, 'claude'])
   await setView($, { mode: null })
@@ -196,6 +216,7 @@ export const register: Register = on => {
     const v = await read($, view)
     const me = await read($, current)
     const app = await chosenApp($)
+    const { platform, apps } = await read($, host)
     const now = await $.clock.now()
     const W = Math.max(28, (e.props.bodyColumns ?? 50) - 1)
 
@@ -210,61 +231,60 @@ export const register: Register = on => {
     const running = rows.filter(row => alive[row.id]).length
     const mode: Mode = v.mode
 
+    // Widths inside a bordered, padded box, and inside a card within a group.
+    const inner = W - 4
+    const cardInner = inner - 4
+    const spread = (left: string, right: string, width: number) =>
+      `${clip(left, width - cells(right) - 1)}${' '.repeat(Math.max(1, width - cells(clip(left, width - cells(right) - 1)) - cells(right)))}${right}`
+
+    const field = (label: string, value: string, color?: string) => (
+      <Text>
+        <Text color="claude">{fit(label, 6)}</Text>
+        <Text color={color} dimColor={!color}>{clip(value, cardInner - 6)}</Text>
+      </Text>
+    )
+
     const card = (row: SessionRow) => {
       const info = alive[row.id]
       const isMe = row.id === me
       const hit = v.hits?.[row.id]
-      const inner = W - 4
+      const state = info
+        ? `● ${info.status === 'busy' ? '工作中' : '開著'} · ${info.app || '?'} ${info.tty.replace('/dev/', '')}${info.kind === 'bg' ? ' · 背景' : ''}`
+        : '○ 已關閉'
       return (
         <Box key={`card-${row.id}`} flexDirection="column" borderStyle="round" borderColor="claude" paddingX={1}>
-          <Text>
-            {info ? <Text color="success">● {info.status === 'busy' ? '工作中' : '開著'}</Text> : <Text dimColor>○ 未開啟</Text>}
-            <Text dimColor>
-              {info ? ` · ${info.app || '?'} · ${info.tty.replace('/dev/', '')}${info.kind === 'bg' ? ' · 背景' : ''}` : ''}
-              {isMe ? ' · 就是這個 session' : ''}
-            </Text>
-          </Text>
-          <Text dimColor>{clip(`${row.branch || '-'} · ${row.prompts} prompts · ${sizeOf(row.size)} · ${row.started.replace('T', ' ').slice(0, 16)}`, inner)}</Text>
-          <Text dimColor>{clip(row.id, inner)}</Text>
-          <Text>
-            <Text color="claude">首 </Text>
-            {clip(row.firstPrompt || '-', inner * 2 - 3)}
-          </Text>
-          {row.lastPrompt !== row.firstPrompt && (
-            <Text>
-              <Text color="claude">末 </Text>
-              {clip(row.lastPrompt || '-', inner * 2 - 3)}
-            </Text>
-          )}
-          {hit && (
-            <Text>
-              <Text color="claude">搜 </Text>
-              <Text dimColor>{clip(hit.snippet, inner * 2 - 3)}</Text>
-            </Text>
-          )}
+          {field('狀態', isMe ? `◆ 就是這個 session` : state, isMe ? 'claude' : info ? 'success' : undefined)}
+          {field('分支', `${row.branch || '-'}   ${row.prompts} prompts   ${sizeOf(row.size)}`)}
+          {field('建立', row.started.replace('T', ' ').slice(0, 16))}
+          {field('ID', row.id)}
+          <Text color="subtle">{'┄'.repeat(cardInner)}</Text>
+          {field('首句', row.firstPrompt || '-', 'text')}
+          {row.lastPrompt !== row.firstPrompt && field('末句', row.lastPrompt || '-', 'text')}
+          {hit && field('命中', hit.snippet, 'warning')}
+          <Text color="subtle">{'┄'.repeat(cardInner)}</Text>
           {mode?.kind === 'rename' && mode.id === row.id && Input ? (
-            <Box flexDirection="column" marginTop={1}>
+            <Box flexDirection="column">
               <Input key={`rename-${row.id}`} label="新名稱 " value={row.title} autoFocus submitLabel="改名"
                 onInput={() => {}} onSubmit={(value: string) => void rename($, row, value)} />
               <Button key="cancel" label="取消" hotkey="q" plain onPress={() => void setView($, { mode: null })} />
             </Box>
           ) : mode?.kind === 'delete' && mode.id === row.id ? (
-            <Box flexDirection="row" gap={1} marginTop={1} flexWrap="wrap">
+            <Box flexDirection="row" gap={1} flexWrap="wrap">
               <Text color="error">移到垃圾桶？</Text>
               <Button key="confirm" label="確定刪除" hotkey="y" variant="primary" onPress={() => void remove($, row)} />
               <Button key="cancel" label="取消" hotkey="q" onPress={() => void setView($, { mode: null })} />
             </Box>
           ) : (
-            <Box flexDirection="row" gap={1} marginTop={1} flexWrap="wrap">
+            <Box flexDirection="row" gap={1} flexWrap="wrap">
               {!isMe && (
-                <Button key={`jump-${row.id}`} label={info ? '跳過去' : `Resume`} hotkey="t" variant="primary"
+                <Button key={`jump-${row.id}`} label={info ? '跳過去' : 'Resume'} hotkey="t" variant="primary"
                   onPress={() => void jump($, row)} />
               )}
               <Button key={`rename-btn-${row.id}`} label="改名" hotkey="e"
                 onPress={() => void setView($, { mode: { kind: 'rename', id: row.id } })} />
               <Button key={`copy-${row.id}`} label="複製指令" hotkey="c"
                 onPress={() =>
-                  void $.ui.copy({ text: resumeCommand(row) })
+                  void $.ui.copy({ text: resumeCommand(row, platform) })
                     .then(r => say($, r.isCopied ? '已複製 resume 指令' : '複製失敗'))
                 } />
               {!info && (
@@ -277,36 +297,54 @@ export const register: Register = on => {
       )
     }
 
+    const status = v.busy ?? v.note ?? (q ? `符合 ${shown.length} 個` : '')
+
     return (
       <Box flexDirection="column">
-        <Box flexDirection="row" justifyContent="space-between">
+        <Box flexDirection="column" borderStyle="round" borderColor="claude" paddingX={1}>
           <Text>
             <Text bold color="claude">SESSIONS</Text>
-            <Text dimColor>{`  ${rows.length} · ${folders.length} 資料夾 · `}</Text>
+            <Text dimColor>{spread('', `${rows.length} sessions · ${folders.length} 資料夾 · `, inner - 8 - cells(`${running} 開著`))}</Text>
             <Text color="success">{`${running} 開著`}</Text>
           </Text>
-          <Box flexDirection="row" gap={1}>
+          {Input && (
+            <Input key="query" placeholder="搜 title／資料夾／prompt · Enter 搜內文" submitLabel="搜內文" value={v.query}
+              onInput={(value: string) => void setView($, { query: value, hits: null, note: null })}
+              onSubmit={(value: string) => void searchContent($, value)} />
+          )}
+          <Text color="subtle">{'─'.repeat(inner)}</Text>
+          <Box flexDirection="row" gap={2} flexWrap="wrap">
             <Button key="new" label="+ 新增" hotkey="n" plain
               onPress={() => void setView($, { mode: mode?.kind === 'new' ? null : { kind: 'new', dir: tilde(rows.find(r => r.id === v.selected)?.cwd ?? folders[0] ?? '~') } })} />
-            <Button key="refresh" label="↻" hotkey="r" plain onPress={() => void refresh($)} />
+            <Button key="refresh" label="↻ 重新整理" hotkey="r" plain onPress={() => void refresh($)} />
+            {apps.length > 1 ? (
+              <Button key="app" label={`⇢ ${app}`} hotkey="a" plain onPress={() => void cycleApp($)} />
+            ) : (
+              <Text dimColor>{`⇢ ${app}`}</Text>
+            )}
+            {v.query && <Button key="clear" label="✕ 清除" hotkey="x" plain onPress={() => void setView($, { query: '', hits: null, note: null })} />}
           </Box>
+          {status && <Text color={v.busy ? 'warning' : 'subtle'}>{clip(status, inner)}</Text>}
         </Box>
 
         {mode?.kind === 'new' && (
           <Box flexDirection="column" borderStyle="round" borderColor="claude" paddingX={1}>
-            <Text bold>新 session</Text>
+            <Text bold color="claude">新 SESSION</Text>
             {Input && (
               <Input key="newdir" label="資料夾 " value={mode.dir} autoFocus submitLabel="開始"
                 onInput={(value: string) => void setView($, { mode: { kind: 'new', dir: value } })}
                 onSubmit={(value: string) => void startNew($, value)} />
             )}
+            <Text color="subtle">{'┄'.repeat(inner)}</Text>
+            <Text dimColor>最近的資料夾</Text>
+            {folders.slice(0, 6).map((dir, i) => (
+              <Button key={`dir-${i}`} plain onPress={() => void setView($, { mode: { kind: 'new', dir: tilde(dir) } })}>
+                <Text color={tilde(dir) === mode.dir ? 'claude' : undefined}>{tilde(dir) === mode.dir ? '▸ ' : '  '}</Text>
+                <Text dimColor={tilde(dir) !== mode.dir}>{clip(tilde(dir), inner - 2)}</Text>
+              </Button>
+            ))}
+            <Text color="subtle">{'┄'.repeat(inner)}</Text>
             <Box flexDirection="row" gap={1} flexWrap="wrap">
-              {folders.slice(0, 6).map((dir, i) => (
-                <Button key={`dir-${i}`} label={clip(tilde(dir), 32)} plain dimColor={tilde(dir) !== mode.dir}
-                  onPress={() => void setView($, { mode: { kind: 'new', dir: tilde(dir) } })} />
-              ))}
-            </Box>
-            <Box flexDirection="row" gap={1} marginTop={1} flexWrap="wrap">
               <Button key="start" label={`在 ${app} 開始`} hotkey="s" variant="primary" onPress={() => void startNew($, mode.dir)} />
               <Button key="browse" label="瀏覽…" hotkey="b"
                 onPress={() =>
@@ -318,44 +356,31 @@ export const register: Register = on => {
           </Box>
         )}
 
-        {Input && (
-          <Input key="query" placeholder="搜 title／資料夾／prompt · Enter 搜內文" submitLabel="搜內文" value={v.query}
-            onInput={(value: string) => void setView($, { query: value, hits: null, note: null })}
-            onSubmit={(value: string) => void searchContent($, value)} />
-        )}
-
-        <Box flexDirection="row" justifyContent="space-between">
-          <Text color={v.busy ? 'warning' : 'subtle'}>{clip(v.busy ?? v.note ?? (q ? `符合 ${shown.length} 個` : ' '), W - 18)}</Text>
-          <Box flexDirection="row" gap={1}>
-            {v.query && <Button key="clear" label="清除" hotkey="x" plain onPress={() => void setView($, { query: '', hits: null, note: null })} />}
-            <Button key="app" label={`開啟用 ${app}`} hotkey="a" plain dimColor onPress={() => void cycleApp($)} />
-          </Box>
-        </Box>
-
         {rows.length === 0 && !v.busy && <Text dimColor>這台機器上還沒有 session。</Text>}
 
         {[...groups].map(([dir, list]) => (
-          <Box key={`group-${dir}`} flexDirection="column" marginTop={1}>
+          <Box key={`group-${dir}`} flexDirection="column" borderStyle="round" borderColor="subtle" paddingX={1}>
             <Text>
-              <Text color="claude">▌</Text>
-              <Text bold>{` ${clip(tilde(dir), W - 8)}`}</Text>
-              <Text dimColor>{`  ${list.length}`}</Text>
+              <Text color="claude">▌ </Text>
+              <Text bold>{fit(tilde(dir), inner - 2 - 6)}</Text>
+              <Text dimColor>{`${list.length} 個`.padStart(6)}</Text>
             </Text>
+            <Text color="subtle">{'─'.repeat(inner)}</Text>
             {list.map(row => {
               const info = alive[row.id]
               const isOpen = v.selected === row.id
               const isMe = row.id === me
               const hit = v.hits?.[row.id]
-              const tail = hit ? `${hit.hits}×` : age(now - row.updated)
+              const tail = hit ? `${hit.hits} 處` : age(now - row.updated)
               return (
                 <Box key={`item-${row.id}`} flexDirection="column">
                   <Button key={`row-${row.id}`} plain
                     onPress={() => void setView($, { selected: isOpen ? null : row.id, mode: null })}>
-                    <Text color={isMe ? 'claude' : info ? 'success' : 'subtle'}>{isMe ? ' ◆ ' : info ? ' ● ' : ' · '}</Text>
-                    <Text bold={isOpen} color={isOpen ? 'claude' : undefined}>{fit(row.title, W - 9)}</Text>
-                    <Text dimColor>{tail.padStart(5)}</Text>
+                    <Text color={isMe ? 'claude' : info ? 'success' : 'subtle'}>{isMe ? '◆ ' : info ? '● ' : '○ '}</Text>
+                    <Text bold={isOpen} color={isOpen ? 'claude' : undefined}>{fit(row.title, inner - 2 - 7)}</Text>
+                    <Text dimColor>{fit(tail.padStart(7), 7)}</Text>
                   </Button>
-                  {hit && !isOpen && <Text dimColor>{`   ↳ ${clip(hit.snippet, W - 6)}`}</Text>}
+                  {hit && !isOpen && <Text dimColor>{`  ↳ ${clip(hit.snippet, inner - 4)}`}</Text>}
                   {isOpen && card(row)}
                 </Box>
               )
@@ -363,8 +388,7 @@ export const register: Register = on => {
           </Box>
         ))}
         {shown.length > LIMIT && <Text dimColor>{`還有 ${shown.length - LIMIT} 個，用搜尋縮小範圍`}</Text>}
-        <Text dimColor>{' '}</Text>
-        <Text dimColor>◆ 這個 session  ● 開著  · 已關閉</Text>
+        <Text dimColor>{' ◆ 這個 session   ● 開著   ○ 已關閉'}</Text>
       </Box>
     )
   })

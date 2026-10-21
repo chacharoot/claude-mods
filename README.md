@@ -14,11 +14,19 @@ Claude Code 的兩個 mod（hooks-module plugin），都會在對話旁邊開一
 - **+ 新增**：選資料夾開新 session
 - 指令：`/sessions`
 
-需求：macOS、系統內建的 `python3`（用來讀超過 4MB 的 transcript）。
+需求：Python 3（用來讀超過 4MB 的 transcript；依序試 `python3`、`python`、`py -3`）。
+
+| | macOS | Windows |
+| --- | --- | --- |
+| 列表、搜尋、改名 | ✓ | ✓ |
+| Resume／新增 | Warp、iTerm、Terminal | Windows Terminal 新分頁（沒有 `wt` 時開 cmd 視窗） |
+| 跳到已開著的 session | Terminal、iTerm 直接切分頁；Warp 只叫出 app | 只提示它在哪（Windows Terminal 不讓外部選分頁） |
+| 刪除 | 移到垃圾桶 | 移到資源回收筒 |
+| 複製指令 | shell 語法 | PowerShell 語法 |
 
 ## agent-zoo
 
-每個 sub-agent 都是一隻會動的 ASCII 小人：執行中會走動，等待時打瞌睡，完成 `(^_^)b`，失敗 `(x_x)`。旁邊顯示類型、跑了多久、用了幾次工具、現在在做什麼；超過 60 秒沒動靜會標 idle。
+每個 sub-agent 都是一顆有光影的 3D 小機器人（終端機半格像素，Windows Terminal、Warp、iTerm 都能顯示），顏色代表類型：執行中會跳、眼睛左右看，等待時閉眼，完成時笑，失敗時打叉。旁邊顯示類型、跑了多久、用了幾次工具、現在在做什麼；超過 60 秒沒動靜會標 idle。
 
 指令：`/agent-zoo` 打開 panel，`/agent-zoo clear` 清掉已完成的。
 
@@ -43,3 +51,12 @@ claude plugin install agent-zoo --marketplace chacharoot/claude-mods
 ```
 
 Desktop app 裡 `/plugin` 不能用：點輸入框旁的 **+** → **Plugins** → **Add marketplace** 填 `chacharoot/claude-mods` → **Add plugin**。
+
+## 更新
+
+```
+claude plugin update session-manager@claude-mods
+claude plugin update agent-zoo@claude-mods
+```
+
+再在 Claude Code 裡打 `/reload-plugins`。改了什麼見 [CHANGELOG.md](CHANGELOG.md)。
