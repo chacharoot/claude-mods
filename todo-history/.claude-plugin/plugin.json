@@ -1,1 +1,1 @@
-{ "name": "todo-history", "version": "0.2.0", "description": "A pane with the full history of the todo list and tasks, and a way back: restore the list, and the files edited since, to any earlier step", "types": "./types/index.d.ts" }
+{ "name": "todo-history", "version": "0.2.1", "description": "A pane with the full history of the todo list and tasks, and a way back: restore the list, and the files edited since, to any earlier step", "types": "./types/index.d.ts" }

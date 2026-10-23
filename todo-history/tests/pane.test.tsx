@@ -282,7 +282,8 @@ test('without a todo tool of the engine, it serves its own, and a restore applie
   const call = (list: [string, 'pending' | 'in_progress' | 'completed'][]) =>
     $.tool.call({ tool: 'mcp__todo-history__todo', todos: list.map(([content, status]) => ({ content, status })) } as never)
   const answer = await call([['Read the spec', 'in_progress'], ['Write code', 'pending']])
-  expect(JSON.stringify(answer)).toMatch(/Todo list saved: 0\/2 done/)
+  // Text: the engine checks a registered tool's result against text or content blocks.
+  expect((answer as { result?: unknown }).result).toBe('Todo list saved: 0/2 done.')
   await call([['Read the spec', 'completed'], ['Write code', 'in_progress']])
   // The plugin answers its own tool: nothing beneath it ran.
   expect(builtinCalls).toEqual([])
