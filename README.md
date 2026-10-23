@@ -1,6 +1,32 @@
 # claude-mods
 
-Claude Code 的三個 mod（hooks-module plugin），都會在對話旁邊開一個常駐 panel。
+Claude Code 的三個 mod（hooks-module plugin），都會在對話旁邊開一個常駐 panel。macOS 和 Windows 都能用。
+
+| Mod | 一句話 | 指令 |
+| --- | --- | --- |
+| **agent-zoo** | 每個 sub-agent／fork 都是一隻 3D 像素小機器人，點開看它即時在做什麼 | `/agent-zoo` |
+| **todo-history** | todo 清單的完整歷程：單獨撤銷一個 task、整段回到某一步，rewind 時清單自動跟著回去 | `/todos` |
+| **session-manager** | 這台電腦所有 Claude Code session 的列表：搜尋、resume、打開背景 session，順便顯示剩餘額度 | `/sessions` |
+
+```
+/plugin install agent-zoo --marketplace chacharoot/claude-mods
+/plugin install todo-history --marketplace chacharoot/claude-mods
+/plugin install session-manager --marketplace chacharoot/claude-mods
+```
+
+## 預覽
+
+**agent-zoo**：跑著的 agent 會跳、做完會笑；點「▸ 看進度」看它說了什麼、用了哪些工具。
+
+<img src="docs/agent-zoo.png" alt="agent-zoo：兩個完成的 agent，各自一隻像素機器人" width="480">
+
+**todo-history**：「目前清單」看進度、點一項單獨撤銷；「歷程」看每一步、回到任一步，agent 和 fork 也在裡面。
+
+<img src="docs/todo-current.png" alt="todo-history 目前清單：1/3 完成" width="480"> <img src="docs/todo-history.png" alt="todo-history 歷程：還原、rewind、agent 和 fork 的紀錄" width="480">
+
+**session-manager**：依資料夾分組，上方是 5 小時／7 天的剩餘額度。
+
+<img src="docs/sessions.png" alt="session-manager：剩餘額度和 session 列表" width="480">
 
 ## session-manager
 
