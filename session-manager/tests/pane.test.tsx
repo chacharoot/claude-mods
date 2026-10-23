@@ -219,7 +219,7 @@ test('a background session (a /fork) opens attached in a new tab', async ($, on)
     const out = args[0] === 'index'
       ? {
           rows: [ROW('fk', 'Forked talk', 'D:\\test')],
-          live: { fk: { pid: 7, tty: '', status: 'idle', kind: 'bg', name: 'fork', app: 'Console' } },
+          live: { fk: { pid: 7, tty: '', status: 'idle', kind: 'bg', name: 'fork', app: 'Console', jobId: 'f4756600' } },
           platform: 'win',
           apps: ['Windows Terminal'],
         }
@@ -233,7 +233,7 @@ test('a background session (a /fork) opens attached in a new tab', async ($, on)
   await ui.press({ key: 'row-fk' })
   expect(await ui.find({ type: 'Text', text: /背景/ })).toBeDefined()
   await ui.press({ key: 'jump-fk' })
-  expect(calls.find(c => c[0] === 'open')).toEqual(['open', 'Windows Terminal', 'D:\\test', 'claude attach fk'])
+  expect(calls.find(c => c[0] === 'open')).toEqual(['open', 'Windows Terminal', 'D:\\test', 'claude attach f4756600'])
   expect(calls.some(c => c[0] === 'focus')).toBe(false)
   expect(await ui.find({ type: 'Text', text: /已在 Windows Terminal 打開/ })).toBeDefined()
   await ui.unmount()

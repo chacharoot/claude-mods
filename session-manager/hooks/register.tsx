@@ -165,7 +165,8 @@ async function jump($: EngineInterface, row: SessionRow) {
   if (info?.kind === 'bg') {
     const app = await chosenApp($)
     await setView($, { busy: `在 ${app} 打開背景 session…` })
-    const done = await python<Done>($, ['open', app, row.cwd, `claude attach ${row.id}`])
+    // attach takes the job's short id, not the session id; it has been the id's first 8 characters.
+    const done = await python<Done>($, ['open', app, row.cwd, `claude attach ${info.jobId || row.id.slice(0, 8)}`])
     return say($, done.ok
       ? `已在 ${app} 打開「${clip(row.title, 20)}」；在空白輸入框按 ← 離開，它會繼續在背景`
       : `${app} 開啟失敗：${done.msg}`)

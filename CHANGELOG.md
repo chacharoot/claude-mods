@@ -1,5 +1,8 @@
 # Changelog
 
+## session-manager 0.2.4
+- **修正**：「打開」背景 session 時用了完整的 session id，`claude attach` 只認 8 碼的短 id（`claude agents` 列出的那個），所以會顯示 `No job matching`。現在改用 session 檔裡記的短 id。
+
 ## session-manager 0.2.3
 - **打開背景 session**：`/fork` 或 `--bg` 開出來的背景 session 沒有自己的視窗，原本按「跳過去」沒反應。現在按鈕顯示「打開」，會在新的 Windows Terminal 分頁執行 `claude attach`，直接進到那個對話；在空白輸入框按 ← 離開，它會繼續在背景。
 

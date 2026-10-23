@@ -142,7 +142,8 @@ def live():
         tty = "" if WIN else ps(o["pid"], "tty")
         out[o["sessionId"]] = {"pid": o["pid"], "tty": "" if tty in ("", "??") else "/dev/" + tty,
                                "status": o.get("status") or "", "kind": o.get("kind") or "",
-                               "name": o.get("name") or "", "app": host_app(o["pid"])}
+                               "name": o.get("name") or "", "app": host_app(o["pid"]),
+                               "jobId": o.get("jobId") or ""}
     return out
 
 def index(root, cache_path):

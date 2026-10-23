@@ -152,7 +152,8 @@ function Get-Live {
         if (-not $sid -or -not $procId) { continue }
         if (-not (Get-Process -Id $procId -ErrorAction SilentlyContinue)) { continue }
         $out[$sid] = @{ pid = $procId; tty = ''; status = [string](Get-Field $o 'status')
-                        kind = [string](Get-Field $o 'kind'); name = [string](Get-Field $o 'name'); app = $app }
+                        kind = [string](Get-Field $o 'kind'); name = [string](Get-Field $o 'name'); app = $app
+                        jobId = [string](Get-Field $o 'jobId') }
     }
     $out
 }

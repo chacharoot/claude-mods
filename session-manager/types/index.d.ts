@@ -20,6 +20,8 @@ export type LiveInfo = {
   kind: string
   name: string
   app: string
+  // A background session's short id, what `claude attach` takes; absent from older scans.
+  jobId?: string
 }
 
 // Where the scanner runs, and the terminal apps it can open a session in.
