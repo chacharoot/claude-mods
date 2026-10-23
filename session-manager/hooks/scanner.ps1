@@ -79,6 +79,8 @@ function Get-Lines([string]$path) {
 # Emits each text of a message's content, one string at a time.
 function Get-Texts($content) {
     if ($content -is [string]) { return $content }
+    # A one-block array comes back from Get-Field unrolled to the block itself.
+    if ($content -is [System.Collections.IDictionary]) { $content = @(, $content) }
     if ($content -is [System.Array]) {
         foreach ($block in $content) {
             if ((Get-Field $block 'type') -eq 'text') { [string](Get-Field $block 'text') }
