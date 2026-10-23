@@ -14,6 +14,37 @@ const view = atom({ plugin: 'todo-history', key: 'view' } as const, { owner: '',
 // Tools that edit a file in place: its content is saved before the first such edit after each step.
 const FILE_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit', 'MultiEdit'])
 
+// Where the engine offers no todo tool, this plugin serves one of its own, shaped like TodoWrite.
+const TODO_TOOL = 'mcp__todo-history__todo'
+const TODO_SPEC = {
+  name: 'todo',
+  isDeferred: false,
+  description:
+    'Keep a todo list for work with several steps, so the user can follow progress and roll back to any step. ' +
+    'Send the whole list on every call. Write it before starting, keep exactly one item in_progress while working, ' +
+    'and mark each item completed as soon as it is done, one call per change (do not batch them).',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      todos: {
+        type: 'array',
+        description: 'The whole updated list',
+        items: {
+          type: 'object',
+          properties: {
+            content: { type: 'string', description: 'What to do, in the imperative' },
+            status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] },
+          },
+          required: ['content', 'status'],
+        },
+      },
+    },
+    required: ['todos'],
+  },
+}
+// Set at session start when the plugin's own tool serves the main list.
+let ownTool = false
+
 // Where this session's history and saved file copies live.
 let dir = ''
 
@@ -209,7 +240,10 @@ async function restore($: EngineInterface, n: number, withFiles: boolean) {
   // These tool calls carry this plugin as their origin; the tool.call hook skips them.
   let items = step.items
   let isApplied = false
-  if (step.owner === '') {
+  if (step.owner === '' && ownTool) {
+    // The plugin's own tool keeps the list: recording the step below is the restore.
+    isApplied = true
+  } else if (step.owner === '') {
     isApplied = await $.tool
       .call({ tool: 'TodoWrite', todos: items.map(item => ({ content: item.content, status: item.status, activeForm: item.content })) })
       .then(r => !('deny' in r), () => false)
@@ -262,6 +296,9 @@ export const register: Register = on => {
         }
       }
     }
+    const tools = await $.tool.list().catch(() => [])
+    ownTool = !tools.some(tool => tool.name === 'TodoWrite' || tool.name === 'TaskCreate')
+    if (ownTool) await $.tool.register(TODO_SPEC).catch(() => (ownTool = false))
     void $.ui.open({ id: PANE, title: TITLE })
 
     return done
@@ -284,6 +321,17 @@ export const register: Register = on => {
   on('tool.call', async ($, e, next) => {
     // A restore's own TodoWrite and task calls: it records the result itself.
     if (next.origin.plugin === 'todo-history') return next(e)
+    if (e.tool === TODO_TOOL) {
+      const input = e as unknown as { todos?: { content?: unknown; status?: unknown }[] }
+      const items = (Array.isArray(input.todos) ? input.todos : []).flatMap((todo): Item[] => {
+        const content = String(todo?.content ?? '').trim()
+        const status = ['pending', 'in_progress', 'completed'].includes(String(todo?.status)) ? (todo.status as Status) : 'pending'
+        return content ? [{ key: content, content, status }] : []
+      })
+      await serial(() => record($, e.agentId ?? '', items))
+      const done = items.filter(item => item.status === 'completed').length
+      return { result: { content: [{ type: 'text', text: `Todo list saved: ${done}/${items.length} done.` }], isError: false } }
+    }
     if (FILE_TOOLS.has(e.tool)) {
       const input = e as { file_path?: unknown; notebook_path?: unknown }
       await serial(() => backup($, ownerOf(e.agentId, e.tool), String(input.file_path ?? input.notebook_path ?? '')))

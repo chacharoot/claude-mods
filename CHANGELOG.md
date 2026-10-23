@@ -1,5 +1,8 @@
 # Changelog
 
+## todo-history 0.2.0
+- **自帶 todo 工具**：Claude Code 沒有提供內建的 `TodoWrite`／`TaskCreate` 時，todo-history 會註冊自己的 `todo` 工具給 Claude 用，用法跟 TodoWrite 一樣；清單由 todo-history 保管，還原時直接套用。
+
 ## todo-history 0.1.2
 - **修正**：0.1.0 存下的檔案備份沒有步驟編號，0.1.1 會把它們當成「每一步之後」的修改，還原任何一步都會把那些檔案寫回舊內容。現在載入時把它們視為發生在第一步之前，不會被還原。
 

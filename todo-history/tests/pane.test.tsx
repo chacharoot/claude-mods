@@ -259,3 +259,41 @@ test('changes saved by 0.1.0, without a step number, are not restored by a later
   expect(files.get('C:/proj/old.ts')).toBe('edited long ago')
   await ui.unmount()
 })
+
+test('without a todo tool of the engine, it serves its own, and a restore applies to it directly', async ($, on) => {
+  const registered: unknown[] = []
+  const builtinCalls: string[] = []
+  on('command.register', () => ({ value: { command: 'todos' } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('session.id', () => ({ value: 's5' }))
+  on('agent.list', () => ({ value: [] }))
+  on('env.get', () => ({ value: undefined }))
+  on('tool.list', () => ({ value: [{ name: 'Read' }, { name: 'Edit' }] }))
+  on('tool.register', (_, e) => (registered.push(e), { value: { tool: 'mcp__todo-history__todo' } }))
+  on('tool.call', (_, e) => (builtinCalls.push(e.tool), { result: {} }))
+  on('prompt.submit', (_, e) => ({ text: e.text, context: e.context }))
+  mock.clock(on)
+
+  await $.session.start({ cwd: 'C:/proj', surface: 'terminal', isInteractive: true })
+  expect(registered).toHaveLength(1)
+  expect((registered[0] as { name: string; isDeferred: boolean }).name).toBe('todo')
+
+  const call = (list: [string, 'pending' | 'in_progress' | 'completed'][]) =>
+    $.tool.call({ tool: 'mcp__todo-history__todo', todos: list.map(([content, status]) => ({ content, status })) } as never)
+  const answer = await call([['Read the spec', 'in_progress'], ['Write code', 'pending']])
+  expect(JSON.stringify(answer)).toMatch(/Todo list saved: 0\/2 done/)
+  await call([['Read the spec', 'completed'], ['Write code', 'in_progress']])
+  // The plugin answers its own tool: nothing beneath it ran.
+  expect(builtinCalls).toEqual([])
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /✓ Read the spec/ })).toBeDefined()
+  await ui.press({ key: 'step-btn-1' })
+  await ui.press({ key: 'list-1' })
+  await ui.press({ key: 'yes' })
+  expect(builtinCalls).toEqual([])
+  const told = await $.prompt.submit({ text: 'go on', wait: false })
+  expect(told.context?.join('\n')).toMatch(/rolled the todo list back to step #1 with the todo-history mod\. The list is now:\n- \[in_progress\] Read the spec/)
+  await ui.unmount()
+})

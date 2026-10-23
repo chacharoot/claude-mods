@@ -37,7 +37,7 @@ Claude Code 的三個 mod（hooks-module plugin），都會在對話旁邊開一
 
 ## todo-history
 
-Claude 的 todo（`TodoWrite`）和 task（`TaskCreate`／`TaskUpdate`）每變一次就記一步，主對話、各個 sub-agent、共用 task 清單分開記。panel 上方是現在的清單，下面是歷程：`▶ 開始`、`✓ 完成`、`+ 新增`、`− 移除`。
+Claude 的 todo（`TodoWrite`）和 task（`TaskCreate`／`TaskUpdate`）每變一次就記一步（Claude Code 沒提供這些工具時，todo-history 會自己提供一個 `todo` 工具給 Claude 用），主對話、各個 sub-agent、共用 task 清單分開記。panel 上方是現在的清單，下面是歷程：`▶ 開始`、`✓ 完成`、`+ 新增`、`− 移除`。
 
 點任一步展開：那時候的清單，以及**之後被改過的檔案**。可以：
 
