@@ -11,7 +11,7 @@ const REWIND_POLL_MS = 3000
 const EMPTY: History = { snapshots: [], changes: [], events: [], blobs: 0, pending: [], epoch: 0 }
 
 const history = atom({ plugin: 'todo-history', key: 'history' } as const, EMPTY)
-const view = atom({ plugin: 'todo-history', key: 'view' } as const, { owner: '', open: null, task: null, confirm: null, note: null } as View)
+const view = atom({ plugin: 'todo-history', key: 'view' } as const, { page: 'now', owner: '', open: null, task: null, confirm: null, note: null } as View)
 
 // Tools that edit a file in place: its content is saved before the first such edit after each step.
 const FILE_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit', 'MultiEdit'])
@@ -610,6 +610,27 @@ export const register: Register = on => {
     return next({ ...e, context: [...(e.context ?? []), ...pending] })
   })
 
+  // One line above the prompt while the main list has work left: what runs now, and how far along.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.props.hasSurvey) return next(e)
+    const hist = await read($, history)
+    const items = (latest(hist, '') ?? latest(hist, 'tasks'))?.items ?? []
+    const done = items.filter(item => item.status === 'completed').length
+    if (items.length === 0 || done === items.length) return next(e)
+    const { Text } = $.ui.resolve(e)
+    const doing = items.find(item => item.status === 'in_progress')
+    const upNext = items.find(item => item.status === 'pending')
+    const W = Math.max(30, (e.viewport?.columns ?? 80) - 2)
+    const tail = `  ✓ ${done}/${items.length}  ·  /todos`
+    return (
+      <Text>
+        <Text color="claude">{doing ? '▶ ' : '☐ '}</Text>
+        <Text bold={!!doing}>{clip(doing?.content ?? `下一步：${upNext?.content ?? ''}`, W - cells(tail) - 2)}</Text>
+        <Text dimColor>{tail}</Text>
+      </Text>
+    )
+  })
+
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text, Button } = $.ui.resolve(e)
     const hist = await read($, history)
@@ -625,13 +646,21 @@ export const register: Register = on => {
     const agentNames = new Map((await $.agent.list().catch(() => [])).map(info => [info.id, info.name ?? info.description ?? info.type]))
     const ownerLabel = (o: Owner) => (o === '' ? '主對話' : o === 'tasks' ? 'Tasks' : clip(agentNames.get(o) ?? `agent ${o.slice(0, 6)}`, 16))
     const setView = (patch: Partial<View>) => void update($, view, now => ({ ...now, ...patch }))
+    // A view kept from before pages existed has none.
+    const page = v.page ?? 'now'
+    const tab = (key: 'now' | 'history', label: string, hotkey: string) => (
+      <Button key={`page-${key}`} hotkey={hotkey} plain onPress={() => setView({ page: key, open: null, task: null, confirm: null })}>
+        <Text color={page === key ? 'claude' : undefined} bold={page === key} underline={page === key}>{label}</Text>
+      </Button>
+    )
 
     const header = (
       <Box flexDirection="column">
-        <Text>
-          <Text bold color="claude">TODO HISTORY</Text>
-          <Text dimColor>{`  ${hist.snapshots.length} 步 · ${hist.changes.length} 個檔案備份`}</Text>
-        </Text>
+        <Box flexDirection="row" gap={2} flexWrap="wrap">
+          <Text bold color="claude">TODO</Text>
+          {tab('now', '目前清單', '1')}
+          {tab('history', `歷程（${hist.snapshots.length + hist.events.length}）`, '2')}
+        </Box>
         {owners.length > 1 && (
           <Box flexDirection="row" gap={2} flexWrap="wrap">
             {owners.map((o, i) => (
@@ -649,8 +678,8 @@ export const register: Register = on => {
       return (
         <Box flexDirection="column">
           {header}
-          <Text dimColor>還沒有 todo 紀錄。</Text>
-          <Text dimColor>Claude 用 todo 或 task、或叫起 agent 時，每一步都會記在這裡。</Text>
+          <Text dimColor>這個 session 還沒有 todo。</Text>
+          <Text dimColor>Claude 用 todo 或 task、或叫起 agent 時，會出現在這裡。</Text>
           {v.note && <Text color="subtle">{clip(v.note, W)}</Text>}
         </Box>
       )
@@ -756,8 +785,7 @@ export const register: Register = on => {
       ...(owner === '' ? hist.events.map((event): Row => ({ kind: 'event', event })) : []),
     ].sort((a, b) => (b.kind === 'step' ? b.step.n : b.event.n) - (a.kind === 'step' ? a.step.n : a.event.n))
     const openStep = mine.find(s => s.n === v.open)
-    const openTask = current?.items.find(item => item.key === v.task)
-    const used = 5 + (current?.items.length ?? 0) + 3 + (openStep ? openStep.items.length + 14 : 0) + (openTask ? 12 : 0)
+    const used = 6 + (openStep ? openStep.items.length + 14 : 0)
     const room = Math.max(3, rows - used)
     const shown = timeline.slice(0, room)
     if (openStep && !shown.some(row => row.kind === 'step' && row.step === openStep)) shown.push({ kind: 'step', step: openStep })
@@ -775,29 +803,55 @@ export const register: Register = on => {
       )
     }
 
+    if (page === 'now') {
+      const items = current?.items ?? []
+      const done = items.filter(item => item.status === 'completed').length
+      // Emptied by a rewind (or a restore) while an earlier list had items: say so, and offer it back.
+      const lastFull = [...mine].reverse().find(step => step.items.length > 0)
+      return (
+        <Box flexDirection="column">
+          {header}
+          {items.length > 0 && (
+            <Text>
+              <Text bold>{`${ownerLabel(owner)}  `}</Text>
+              <Text color={done === items.length ? 'success' : 'claude'}>{`✓ ${done}/${items.length} 完成`}</Text>
+              <Text dimColor>{'   點一項看它改了什麼、單獨撤銷'}</Text>
+            </Text>
+          )}
+          {items.map((item, i) => (
+            <Box key={`now-${i}`} flexDirection="column">
+              <Button key={`item-${i}`} plain onPress={() => setView({ task: v.task === item.key ? null : item.key, confirm: null })}>
+                <Text color={TONE[item.status]}>{`${ICON[item.status]} `}</Text>
+                <Text dimColor={item.status === 'completed'} bold={v.task === item.key}>{clip(item.content, W - 2)}</Text>
+              </Button>
+              {v.task === item.key && taskPanel(item)}
+            </Box>
+          ))}
+          {items.length === 0 && (
+            <Box flexDirection="column">
+              <Text dimColor>
+                {current?.note.startsWith('↶ rewind')
+                  ? clip('清單是空的：對話 rewind 回到這份清單建立之前。', W)
+                  : current ? '清單是空的。' : '這個清單還沒有內容。'}
+              </Text>
+              {lastFull && (
+                <Box marginTop={1}>
+                  <Button key="restore-last" label={`恢復最後一份清單（#${lastFull.n}，${lastFull.items.length} 項）`} hotkey="r"
+                    onPress={() => void restore($, lastFull.n, false)} />
+                </Box>
+              )}
+            </Box>
+          )}
+          {current && <Text color="subtle">{clip(`最近一步 #${current.n}  ${age(now - current.at)}  ${current.note}`, W)}</Text>}
+          {v.note && <Text color="subtle">{clip(v.note, W)}</Text>}
+        </Box>
+      )
+    }
+
     return (
       <Box flexDirection="column">
         {header}
-        <Text>
-          <Text bold>{`現在（${ownerLabel(owner)}）`}</Text>
-          <Text dimColor>{'  點一項看它改了什麼、單獨撤銷'}</Text>
-        </Text>
-        {current && current.items.length === 0 && <Text dimColor>（空的）</Text>}
-        {!current && <Text dimColor>（還沒有清單）</Text>}
-        {current?.items.map((item, i) => (
-          <Box key={`now-${i}`} flexDirection="column">
-            <Button key={`item-${i}`} plain onPress={() => setView({ task: v.task === item.key ? null : item.key, confirm: null })}>
-              <Text color={TONE[item.status]}>{`${ICON[item.status]} `}</Text>
-              <Text dimColor={item.status === 'completed'} bold={v.task === item.key}>{clip(item.content, W - 2)}</Text>
-            </Button>
-            {v.task === item.key && taskPanel(item)}
-          </Box>
-        ))}
-        {rule}
-        <Text>
-          <Text bold>歷程</Text>
-          <Text dimColor>{'  點一步可以整段回到那裡'}</Text>
-        </Text>
+        <Text dimColor>{clip(`${hist.changes.length} 個檔案備份 · 點一步可以只還原清單，或整段回到那裡`, W)}</Text>
         {shown.map(row => row.kind === 'event' ? eventLine(row.event) : (
           <Box key={`step-${row.step.n}`} flexDirection="column">
             <Button key={`step-btn-${row.step.n}`} plain

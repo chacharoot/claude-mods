@@ -60,6 +60,8 @@ export type Confirm =
   | { kind: 'revert'; key: string }
 
 export type View = {
+  // Which page: the list as it stands now, or the history of steps.
+  page: 'now' | 'history'
   owner: Owner
   // The snapshot whose detail is open, the current item whose task panel is open,
   // and an action waiting for its yes.

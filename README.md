@@ -51,6 +51,8 @@ Claude 的 todo（`TodoWrite`）和 task（`TaskCreate`／`TaskUpdate`）每變�
 
 用 Bash／PowerShell 改的檔案不會被記錄。rewind 是靠比對對話判斷的（變短、而且前面的訊息一模一樣才算；`/compact` 不會被誤認）。歷程和檔案備份存在 `~/.claude/todo-history/<session id>/`。
 
+panel 分成兩頁：**目前清單**（`1`）和**歷程**（`2`）。還有工作沒做完時，輸入框上方會常駐一行顯示進行中的 task（`▶ … ✓ 1/3`）。紀錄跟著 session 走：新 session 從空的開始，用 `claude -c`／`--resume` 接續時清單和歷程會回來。
+
 指令：`/todos` 打開 panel，`/todos clear` 清掉這個 session 的歷程。
 
 ## 安裝

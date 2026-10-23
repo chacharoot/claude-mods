@@ -63,7 +63,8 @@ test('records each step, and rolls the list and the files edited since back to o
   await $.tool.call({ tool: 'TodoWrite', todos: todos(['Write parser', 'completed'], ['Add tests', 'pending']) })
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: /3 步 · 2 個檔案備份/ })).toBeDefined()
+  await ui.press({ key: 'page-history' })
+  expect(await ui.find({ type: 'Text', text: /歷程（3）/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /▶ Write parser/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /✓ Write parser/ })).toBeDefined()
 
@@ -114,8 +115,8 @@ test('follows the task tools, and keeps the history in a file under the home fol
   const saved = [...files].find(([path]) => path.endsWith('/home/amy/.claude/todo-history/s2/history.json'))?.[1]
   expect(JSON.parse(saved ?? '{}').snapshots).toHaveLength(2)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: /現在（Tasks）/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /▶ Ship it/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /✓ 0\/1 完成/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^Ship it$/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -168,6 +169,7 @@ test('parallel edits keep a backup each, and an edit in the same millisecond as 
   await $.tool.call(plan('completed'))
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'page-history' })
   await ui.press({ key: 'step-btn-1' })
   await ui.press({ key: 'all-1' })
   await ui.press({ key: 'yes' })
@@ -187,6 +189,7 @@ test('a restore can itself be rolled back, and a file already gone is not a fail
   await $.tool.call(plan('completed'))
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'page-history' })
   await ui.press({ key: 'step-btn-1' })
   await ui.press({ key: 'all-1' })
   await ui.press({ key: 'yes' })
@@ -216,6 +219,7 @@ test('an edit another agent makes while a restore runs is still backed up', asyn
   await $.tool.call(plan('in_progress'))
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'page-history' })
   isRestoring = true
   await ui.press({ key: 'step-btn-1' })
   await ui.press({ key: 'list-1' })
@@ -254,6 +258,7 @@ test('changes saved by 0.1.0, without a step number, are not restored by a later
   await $.session.start({ cwd: 'C:/proj', surface: 'terminal', isInteractive: true })
   await $.tool.call({ tool: 'TodoWrite', todos: todos(['Later work', 'in_progress']) })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'page-history' })
   await ui.press({ key: 'step-btn-1' })
   expect(await ui.find({ type: 'Text', text: /之後沒有用 Edit／Write 改過檔案/ })).toBeDefined()
   expect(files.get('C:/proj/old.ts')).toBe('edited long ago')
@@ -289,6 +294,7 @@ test('without a todo tool of the engine, it serves its own, and a restore applie
   expect(builtinCalls).toEqual([])
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'page-history' })
   expect(await ui.find({ type: 'Text', text: /✓ Read the spec/ })).toBeDefined()
   await ui.press({ key: 'step-btn-1' })
   await ui.press({ key: 'list-1' })
@@ -407,6 +413,7 @@ test('a rewind of the conversation brings the list back to where it stood then',
   messages.splice(2)
   await clock.advance(3000)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'page-history' })
   expect(await ui.find({ type: 'Text', text: /↶ rewind：對話回到第 2 則 → 清單回到 #1/ })).toBeDefined()
   expect(written.at(-1)).toEqual(todos(['Read spec', 'in_progress'], ['Write code', 'pending']))
   await ui.unmount()
@@ -438,7 +445,60 @@ test('agents and forks starting and ending show in the main timeline', async ($,
   await $.turn.complete({ answer: 'found it in a.json', durationMs: 1, isAborted: false, turnId: 'x', agentId: 'ag1', reason: 'answer' } as never)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'page-history' })
   expect(await ui.find({ type: 'Text', text: /🤖 agent「Find the config」開始/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /✓ 🤖 agent「Find the config：found it in a\.json」/ })).toBeDefined()
+  await ui.unmount()
+})
+
+const BAND = {
+  plugin: 'todo-history',
+  component: 'AbovePrompt',
+  props: { hasSurvey: false, isWorking: false, maxRows: 4, bodyColumns: 80 },
+} as const
+
+test('a line above the prompt shows the task in progress while work is left, and nothing once all is done', async ($, on) => {
+  await rig2($, on)
+  await $.tool.call(list(['Write menu', 'completed'], ['Add drinks', 'in_progress'], ['Add desserts', 'pending']))
+  let band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await band.find({ type: 'Text', text: /^Add drinks$/ })).toBeDefined()
+  expect(await band.find({ type: 'Text', text: /✓ 1\/3/ })).toBeDefined()
+  await band.unmount()
+
+  // All done: the plugin passes the band on to the engine's own, which this test has none of.
+  await $.tool.call(list(['Write menu', 'completed'], ['Add drinks', 'completed'], ['Add desserts', 'completed']))
+  const passed = await $.ui.mount({ ...BAND, surface: 'terminal' }).then(() => false, (err: unknown) => /no implementation/.test(String(err)))
+  expect(passed).toBe(true)
+})
+
+test('a list a rewind emptied says why, and the last full list can be brought back', async ($, on) => {
+  const { messages, written, talk, clock } = await rig2($, on)
+  await talk('make a menu')
+  await $.tool.call(list(['Write menu', 'in_progress'], ['Add drinks', 'pending']))
+  await talk('go on')
+  // Rewound to before the list was written.
+  messages.splice(1)
+  await clock.advance(3000)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /rewind 回到這份清單建立之前/ })).toBeDefined()
+  await ui.press({ key: 'restore-last' })
+  expect(written.at(-1)).toEqual(todos(['Write menu', 'in_progress'], ['Add drinks', 'pending']))
+  expect(await ui.find({ type: 'Text', text: /✓ 0\/2 完成/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a resumed session brings its list back from the saved history', async ($, on) => {
+  const { files } = await rig2($, on)
+  await $.tool.call(list(['Keep me', 'in_progress']))
+  const saved = [...files].find(([path]) => path.endsWith('/todo-history/s6/history.json'))?.[1]
+  expect(JSON.parse(saved ?? '{}').snapshots.at(-1).items[0].content).toBe('Keep me')
+
+  // A new process for the same session: the state starts empty and loads the file.
+  await $.command.run({ command: 'todos', args: 'clear' })
+  files.set('C:/Users/amy/.claude/todo-history/s6/history.json', saved ?? '')
+  await $.session.start({ cwd: 'C:/proj', surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /^Keep me$/ })).toBeDefined()
   await ui.unmount()
 })
