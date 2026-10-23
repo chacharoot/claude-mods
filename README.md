@@ -1,12 +1,14 @@
 # claude-mods
 
-Claude Code 的三個 mod（hooks-module plugin），都會在對話旁邊開一個常駐 panel。macOS 和 Windows 都能用。
+**English** | [繁體中文](README.zh-TW.md)
 
-| Mod | 一句話 | 指令 |
+Three Claude Code mods (hooks-module plugins), each a pane that stays open beside the conversation. They work on macOS and Windows.
+
+| Mod | In one line | Command |
 | --- | --- | --- |
-| **agent-zoo** | 每個 sub-agent／fork 都是一隻 3D 像素小機器人，點開看它即時在做什麼 | `/agent-zoo` |
-| **todo-history** | todo 清單的完整歷程：單獨撤銷一個 task、整段回到某一步，rewind 時清單自動跟著回去 | `/todos` |
-| **session-manager** | 這台電腦所有 Claude Code session 的列表：搜尋、resume、打開背景 session，順便顯示剩餘額度 | `/sessions` |
+| **agent-zoo** | Every sub-agent and fork is a little 3D pixel robot; open one to see what it is doing right now | `/agent-zoo` |
+| **todo-history** | The whole history of the todo list: undo one task alone, go back to any step, and the list follows a rewind | `/todos` |
+| **session-manager** | Every Claude Code session on this machine: search, resume, open a background session, and see your remaining usage | `/sessions` |
 
 ```
 /plugin install agent-zoo --marketplace chacharoot/claude-mods
@@ -14,78 +16,82 @@ Claude Code 的三個 mod（hooks-module plugin），都會在對話旁邊開一
 /plugin install session-manager --marketplace chacharoot/claude-mods
 ```
 
-## 預覽
+## Preview
 
-**agent-zoo**：跑著的 agent 會跳、做完會笑；點「▸ 看進度」看它說了什麼、用了哪些工具。
+**agent-zoo**: a running agent hops, a finished one smiles. Press "▸ 看進度" (progress) to see what it said and which tools it used.
 
-<img src="docs/agent-zoo.png" alt="agent-zoo：兩個完成的 agent，各自一隻像素機器人" width="480">
+<img src="docs/agent-zoo.png" alt="agent-zoo: two finished agents, each a pixel robot" width="480">
 
-**todo-history**：「目前清單」看進度、點一項單獨撤銷；「歷程」看每一步、回到任一步，agent 和 fork 也在裡面。
+**todo-history**: the current-list page shows progress and lets you undo one item; the history page shows every step, lets you go back to any of them, and lists agents and forks too.
 
-<img src="docs/todo-current.png" alt="todo-history 目前清單：1/3 完成" width="480"> <img src="docs/todo-history.png" alt="todo-history 歷程：還原、rewind、agent 和 fork 的紀錄" width="480">
+<img src="docs/todo-current.png" alt="todo-history current list: 1 of 3 done" width="480"> <img src="docs/todo-history.png" alt="todo-history history: restores, a rewind, agents and forks" width="480">
 
-**session-manager**：依資料夾分組，上方是 5 小時／7 天的剩餘額度。
+**session-manager**: sessions grouped by folder, with the 5-hour and 7-day usage left at the top.
 
-<img src="docs/sessions.png" alt="session-manager：剩餘額度和 session 列表" width="480">
+<img src="docs/sessions.png" alt="session-manager: usage left and the session list" width="480">
+
+The panes' labels are in Traditional Chinese.
 
 ## session-manager
 
-列出這台機器上所有的 Claude Code session，依資料夾分組，可以用滑鼠點選。
+Lists every Claude Code session on this machine, grouped by folder, clickable.
 
-- 搜尋：打字即時篩選 title／資料夾／prompt，按 Enter 搜所有對話內文
-- 點一個 session 展開詳細資料：
-  - 已開著的 → **跳過去**（Terminal、iTerm 會直接切到那個分頁；Warp 只能叫出 app）
-  - 已關閉的 → **Resume**，在新視窗開（Warp／iTerm／Terminal，按 `a` 切換）
-  - **改名**（寫入跟 `/rename` 一樣的記錄）、**複製指令**、**刪除**（移到垃圾桶，可救回）
-- **+ 新增**：選資料夾開新 session
-- 標題區下方顯示剩餘額度（5 小時、7 天）和多久後重置
-- 指令：`/sessions`
+- Search: type to filter by title, folder or prompt; Enter searches the content of every conversation
+- Press a session to expand its details:
+  - Open in a terminal → **Jump** (Terminal and iTerm switch to its tab; Warp only brings the app forward)
+  - A background session (started by `/fork` or `--bg`, with no window of its own) → **Open**: runs `claude attach` in a new tab to enter it; press ← on an empty prompt to leave, and it keeps running in the background
+  - Closed → **Resume** in a new window (Warp, iTerm or Terminal; `a` switches)
+  - **Rename** (writes the same record as `/rename`), **Copy command**, **Delete** (to the trash, recoverable)
+- **+ New**: start a session in a folder you pick
+- Under the header: the usage left in the 5-hour and 7-day windows, and when each resets
+- Command: `/sessions`
 
-需求：Python 3（用來讀超過 4MB 的 transcript；依序試 `python3`、`python`、`py -3`）。Windows 沒有 Python 時改用內建的 PowerShell 跑同樣的功能，不用另外安裝。
+Needs Python 3 (to read transcripts over 4 MB; it tries `python3`, `python`, `py -3` in turn). On Windows without Python it runs the same features in the built-in PowerShell, with nothing to install.
 
 | | macOS | Windows |
 | --- | --- | --- |
-| 列表、搜尋、改名 | ✓ | ✓ |
-| Resume／新增 | Warp、iTerm、Terminal | Windows Terminal 新分頁（沒有 `wt` 時開 cmd 視窗） |
-| 跳到已開著的 session | Terminal、iTerm 直接切分頁；Warp 只叫出 app | 只提示它在哪（Windows Terminal 不讓外部選分頁） |
-| 刪除 | 移到垃圾桶 | 移到資源回收筒 |
-| 複製指令 | shell 語法 | PowerShell 語法 |
+| List, search, rename | ✓ | ✓ |
+| Resume / new | Warp, iTerm, Terminal | A new Windows Terminal tab (a cmd window without `wt`) |
+| Jump to an open session | Terminal and iTerm switch tabs; Warp only brings the app forward | Says where it is (Windows Terminal cannot be told to select a tab) |
+| Open a background session | `claude attach` in a new window | `claude attach` in a new Windows Terminal tab |
+| Delete | To the Trash | To the Recycle Bin |
+| Copy command | Shell syntax | PowerShell syntax |
 
 ## agent-zoo
 
-每個 sub-agent 都是一顆有光影的 3D 小機器人（終端機半格像素，Windows Terminal、Warp、iTerm 都能顯示），顏色代表類型：執行中會跳、眼睛左右看，等待時閉眼，完成時笑，失敗時打叉。旁邊顯示類型、跑了多久、用了幾次工具、現在在做什麼；超過 60 秒沒動靜會標 idle。
+Every sub-agent is a shaded 3D robot (half-block pixels in the terminal; Windows Terminal, Warp and iTerm all draw it), colored by type: it hops and looks around while running, closes its eyes while waiting, smiles when done, and shows a cross when it fails. Beside it: its type, how long it has run, how many tools it used and what it is doing now; one quiet for over 60 seconds is flagged as possibly stuck.
 
-**點「▸ 看進度」**（清單模式點一整列）展開那個 agent 的即時進度：它收到的任務、說了什麼、呼叫了哪些工具和結果，跑的時候會自己更新；**主畫面看完整對話**直接把主畫面切到它的完整 transcript。按 `l` 切換成**清單模式**：一個 agent 一行、依「誰叫起誰」縮排成樹，agent teams 的 teammate 依團隊分組，agent 多的時候也放得下。Teammate 一輪做完會顯示 waiting（等下一則訊息），不會被當成 done。
+**Press "▸ 看進度"** (or a whole row in list mode) to open that agent's live progress: the task it was given, what it said, the tools it called and their results, refreshed while it runs. **Open the whole conversation** switches the main view to its full transcript. Press `l` for **list mode**: one line per agent, nested under the agent that spawned it, with agent-team teammates grouped by team, so many agents fit. A teammate that finishes a turn shows as waiting (for its next message), not done.
 
-小機器人預設是 10×5 格；想要原本 18×9 的大隻，用 `/agent-zoo big`（`/agent-zoo small` 換回來，會記住）。
+Robots are 10×5 cells by default; `/agent-zoo big` brings back the original 18×9 ones (`/agent-zoo small` switches back; the choice is remembered).
 
-指令：`/agent-zoo` 打開 panel，`/agent-zoo compact` 切換清單模式，`/agent-zoo big`／`small` 切換機器人大小，`/agent-zoo clear` 清掉已完成的。
+Commands: `/agent-zoo` opens the pane, `/agent-zoo compact` toggles list mode, `/agent-zoo big` / `small` sets the robot size, `/agent-zoo clear` drops finished agents.
 
 ## todo-history
 
-Claude 的 todo（`TodoWrite`）和 task（`TaskCreate`／`TaskUpdate`）每變一次就記一步（Claude Code 沒提供這些工具時，todo-history 會自己提供一個 `todo` 工具給 Claude 用），主對話、各個 sub-agent、共用 task 清單分開記。panel 上方是現在的清單，下面是歷程：`▶ 開始`、`✓ 完成`、`+ 新增`、`− 移除`。
+Records a step every time Claude's todo list (`TodoWrite`) or tasks (`TaskCreate` / `TaskUpdate`) change; where Claude Code offers no such tool, todo-history serves its own `todo` tool to Claude. The main conversation, each sub-agent and the shared task list are kept apart. Steps read `▶ started`, `✓ done`, `+ added`, `− removed`.
 
-三種返回，各管各的：
+Three ways back, each with its own reach:
 
-| 想要 | 怎麼做 | 動到什麼 |
+| You want | How | What changes |
 | --- | --- | --- |
-| **只撤銷某一個 task**，其他 task 的成果保留 | 在「現在」的清單點那一項 → **撤銷這個 task** | 只有它進行時改的檔案回到它開始前；後來別的 task 也改過的檔案不硬蓋，會把這個 task 的 diff 交給 Claude，請它只拿掉那部分。task 變回 ☐ |
-| **某一步之後全部不要**，但保留對話 | 在歷程點那一步 → **整段回到這一步** | 清單回到那一步，之後用 Edit／Write 改過的檔案全部還原（之後才新增的會刪掉） |
-| **某一步之後全部不要**，連對話一起 | Claude Code 的 rewind（按兩下 Esc） | 對話和程式碼由 rewind 處理；todo-history 會在幾秒內偵測到，把清單自動跟著回到那時候（記一筆 `↶ rewind`） |
+| **Undo one task**, keep the other tasks' work | On the current list, press the item → **Undo this task** | Only the files it edited go back to how they were before it started. A file that later work also edited is not overwritten: the task's own diff goes to Claude, asking it to take out that part alone. The task goes back to ☐ |
+| **Drop everything after a step**, keep the conversation | In the history, press the step → **Back to this step** | The list goes back to that step, and every file edited since with Edit / Write is restored (files created since are deleted) |
+| **Drop everything after a step**, conversation included | Claude Code's rewind (Esc twice) | The rewind handles the conversation and code; todo-history notices within seconds and brings the list back to that point (a `↶ rewind` step) |
 
-前兩種都會先記一步「📌 …之前的狀態」並備份要動的檔案，按錯了就回到那一步反悔；完成後你下一則訊息會自動告訴 Claude 發生了什麼。歷程裡也會列出 sub-agent 和 fork 的開始與結果（🤖／⑂）。
+The first two record a "📌 state before …" step first, with a copy of every file they touch, so a wrong press can be undone from there; afterwards your next message tells Claude what happened. The history also shows sub-agents and forks starting and finishing (🤖 / ⑂).
 
-用 Bash／PowerShell 改的檔案不會被記錄。rewind 是靠比對對話判斷的（變短、而且前面的訊息一模一樣才算；`/compact` 不會被誤認）。歷程和檔案備份存在 `~/.claude/todo-history/<session id>/`。
+Files changed by Bash or PowerShell are not recorded. A rewind is recognized by comparing the conversation (shorter, with exactly the same messages before the cut; `/compact` is never mistaken for one). The history and file copies live in `~/.claude/todo-history/<session id>/`.
 
-panel 分成兩頁：**目前清單**（`1`）和**歷程**（`2`）。還有工作沒做完時，輸入框上方會常駐一行顯示進行中的 task（`▶ … ✓ 1/3`）。紀錄跟著 session 走：新 session 從空的開始，用 `claude -c`／`--resume` 接續時清單和歷程會回來。
+The pane has two pages: **current list** (`1`) and **history** (`2`). While work is left, a line above the prompt shows the task in progress (`▶ … ✓ 1/3`). The history follows the session: a new session starts empty, and `claude -c` / `--resume` brings the list and history back.
 
-指令：`/todos` 打開 panel，`/todos clear` 清掉這個 session 的歷程。
+Commands: `/todos` opens the pane, `/todos clear` forgets this session's history.
 
-## 安裝
+## Install
 
-這是 private repo：你要先被邀請進這個 repo，而且電腦上的 git 要能讀 github.com（SSH key，或 `gh auth login` 後再 `gh auth setup-git`），安裝時不會詢問帳密。
+This is a private repo: you need an invitation to it, and git on your machine must be able to read github.com (an SSH key, or `gh auth login` then `gh auth setup-git`); installing asks for no password.
 
-在 Claude Code 的輸入框：
+In Claude Code's prompt:
 
 ```
 /plugin install session-manager --marketplace chacharoot/claude-mods
@@ -93,9 +99,9 @@ panel 分成兩頁：**目前清單**（`1`）和**歷程**（`2`）。還有工
 /plugin install todo-history --marketplace chacharoot/claude-mods
 ```
 
-第一次會問 `Add marketplace?`，按 `y`；再選 scope，直接 Enter 選 user。裝好就會在這個 session 生效，之後每個新 session 都會載入。
+The first one asks `Add marketplace?`: press `y`, then Enter for the user scope. It works in that session at once, and in every new session after.
 
-從 shell 安裝：
+From a shell:
 
 ```
 claude plugin install session-manager --marketplace chacharoot/claude-mods
@@ -103,9 +109,9 @@ claude plugin install agent-zoo --marketplace chacharoot/claude-mods
 claude plugin install todo-history --marketplace chacharoot/claude-mods
 ```
 
-Desktop app 裡 `/plugin` 不能用：點輸入框旁的 **+** → **Plugins** → **Add marketplace** 填 `chacharoot/claude-mods` → **Add plugin**。
+In the desktop app, where `/plugin` is not available: press **+** beside the prompt → **Plugins** → **Add marketplace**, enter `chacharoot/claude-mods` → **Add plugin**.
 
-## 更新
+## Update
 
 ```
 claude plugin update session-manager@claude-mods
@@ -113,4 +119,4 @@ claude plugin update agent-zoo@claude-mods
 claude plugin update todo-history@claude-mods
 ```
 
-再在 Claude Code 裡打 `/reload-plugins`。改了什麼見 [CHANGELOG.md](CHANGELOG.md)。
+Then run `/reload-plugins` in Claude Code. What changed: [CHANGELOG.md](CHANGELOG.md) (in Traditional Chinese).
