@@ -1,5 +1,16 @@
 # Changelog
 
+## agent-zoo 0.3.0、todo-history 0.1.0
+
+### agent-zoo
+- **看 agent 的即時進度**：點「▸ 看進度」展開那個 agent 的任務、說的話、工具呼叫和結果，執行中每秒更新；「主畫面看完整對話」把主畫面切到它的完整 transcript。
+- **清單模式**（`l` 或 `/agent-zoo compact`）：一個 agent 一行，依誰叫起誰縮排成樹，agent teams 依團隊分組。
+- **Agent teams**：teammate 一輪做完顯示 waiting、收到訊息再變回 running，不會被當成 done；顯示 teammate 的名字。重新載入後會從 `agent.list` 把還在跑的 agent 補回來。
+
+### todo-history（新）
+- 記錄 todo 和 task 的每一步，主對話、sub-agent、共用 task 清單分開記。
+- 回到任一步：只還原清單，或連同之後用 Edit／Write 改過的檔案一起還原；還原後下一則訊息會告訴 Claude。
+
 ## 0.2.2
 
 ### session-manager

@@ -12,8 +12,13 @@
     {
       "name": "agent-zoo",
       "source": "./agent-zoo",
-      "description": "A pane that shows each sub-agent as a shaded 3D pixel robot: who runs, its status and what it is doing"
+      "description": "A pane that shows each sub-agent and teammate as a shaded 3D pixel robot or a compact tree, with a live view of what each one is doing"
+    },
+    {
+      "name": "todo-history",
+      "source": "./todo-history",
+      "description": "A pane with the full history of the todo list and tasks, and a way back: restore the list, and the files edited since, to any earlier step"
     }
   ],
-  "description": "Claude Code mods: a session manager pane and an animated sub-agent pane"
+  "description": "Claude Code mods: a session manager pane, an animated sub-agent pane and a todo history with rollback"
 }

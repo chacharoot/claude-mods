@@ -51,3 +51,72 @@ test('a spawned agent shows its tool, and a late tool call does not revive it', 
   expect(await ui.find({ type: 'Text', text: /late\.json/ })).toBeUndefined()
   await ui.unmount()
 })
+
+test('pressing an agent shows its transcript live, and opens it whole in the main view', async ($, on) => {
+  const viewed: unknown[] = []
+  const said = [
+    { role: 'user', text: 'look', toolUses: [] },
+    { role: 'assistant', text: 'Checking the config first.\nThen the tests.', toolUses: [
+      { tool_use_id: 'u1', tool: 'Read', input: { file_path: 'C:/x/config.json' }, text: '{ "a": 1 }' },
+      { tool_use_id: 'u2', tool: 'Bash', input: { command: 'npm test' }, text: 'FAIL 2 tests', isError: true },
+    ] },
+  ]
+  on('command.register', () => ({ value: { command: 'agent-zoo' } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('agent.spawn', () => ({ model: 'haiku', agentId: 'a1' }))
+  on('agent.list', () => ({ value: [] }))
+  on('session.messages', (_, e) => ({ value: e.agentId === 'a1' ? said : [] }))
+  on('ui.view', (_, e) => (viewed.push(e), { value: {} }))
+  on('tool.call', () => ({ result: {} }))
+  mock.clock(on)
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.agent.spawn(SPAWN)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+
+  await ui.press({ key: 'open-a1' })
+  expect(await ui.find({ type: 'Text', text: /任務：look/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /💬 Checking the config first\./ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /⚙ Read config\.json/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /↳ FAIL 2 tests/ })).toBeDefined()
+
+  // A new message in the agent's loop shows without pressing again.
+  said.push({ role: 'assistant', text: 'Fixed both.', toolUses: [] })
+  await $.tool.call(inAgent('/x/b.json'))
+  expect(await ui.find({ type: 'Text', text: /💬 Fixed both\./ })).toBeDefined()
+
+  await ui.press({ key: 'full-a1' })
+  expect(viewed).toEqual([{ agentId: 'a1' }])
+  await ui.press({ key: 'close-a1' })
+  expect(await ui.find({ type: 'Text', text: /Fixed both/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('the compact list nests agents under their parent, and a teammate idles instead of finishing', async ($, on) => {
+  let next = 0
+  on('command.register', () => ({ value: { command: 'agent-zoo' } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('agent.spawn', (_, e) => {
+    next += 1
+    return e.isTeammate ? { model: 'opus', agentId: `t${next}`, teammateId: `reviewer@crew` } : { model: 'haiku', agentId: `a${next}` }
+  })
+  on('agent.list', () => ({ value: [] }))
+  on('turn.complete', () => ({ text: '' }))
+  mock.clock(on)
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.agent.spawn({ ...SPAWN, description: 'Lead the search' })
+  await $.agent.spawn({ ...SPAWN, description: 'Child search', parentAgentId: 'a1' } as AgentSpawnInput)
+  await $.agent.spawn({ ...SPAWN, description: 'Review', isTeammate: true, name: 'reviewer' } as AgentSpawnInput)
+  await $.command.run({ command: 'agent-zoo', args: 'compact' })
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /└ Explore/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /團隊：crew/ })).toBeDefined()
+
+  await $.turn.complete({ answer: 'looks fine', durationMs: 1, isAborted: false, turnId: 'x', agentId: 't3', reason: 'answer' })
+  expect(await ui.find({ type: 'Text', text: /1 waiting/ })).toBeDefined()
+  await ui.unmount()
+})
