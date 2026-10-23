@@ -1,5 +1,8 @@
 # Changelog
 
+## todo-history 0.2.1
+- **修正**：自帶的 `todo` 工具回傳了物件，Claude Code 只接受文字，呼叫會顯示錯誤（清單其實有記下）。
+
 ## todo-history 0.2.0
 - **自帶 todo 工具**：Claude Code 沒有提供內建的 `TodoWrite`／`TaskCreate` 時，todo-history 會註冊自己的 `todo` 工具給 Claude 用，用法跟 TodoWrite 一樣；清單由 todo-history 保管，還原時直接套用。
 

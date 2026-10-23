@@ -330,7 +330,8 @@ export const register: Register = on => {
       })
       await serial(() => record($, e.agentId ?? '', items))
       const done = items.filter(item => item.status === 'completed').length
-      return { result: { content: [{ type: 'text', text: `Todo list saved: ${done}/${items.length} done.` }], isError: false } }
+      // A registered tool answers with text (or content blocks), never an object.
+      return { result: `Todo list saved: ${done}/${items.length} done.` }
     }
     if (FILE_TOOLS.has(e.tool)) {
       const input = e as { file_path?: unknown; notebook_path?: unknown }
