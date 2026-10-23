@@ -39,12 +39,17 @@ Claude Code 的三個 mod（hooks-module plugin），都會在對話旁邊開一
 
 Claude 的 todo（`TodoWrite`）和 task（`TaskCreate`／`TaskUpdate`）每變一次就記一步（Claude Code 沒提供這些工具時，todo-history 會自己提供一個 `todo` 工具給 Claude 用），主對話、各個 sub-agent、共用 task 清單分開記。panel 上方是現在的清單，下面是歷程：`▶ 開始`、`✓ 完成`、`+ 新增`、`− 移除`。
 
-點任一步展開：那時候的清單，以及**之後被改過的檔案**。可以：
+三種返回，各管各的：
 
-- **只還原清單**：清單回到那一步。
-- **清單＋檔案一起還原**：清單回到那一步，之後用 Edit／Write 改過的檔案也還原成那時的內容（那之後才新增的檔案會刪掉）。要撤銷一個 task，就回到它「▶ 開始」那一步。
+| 想要 | 怎麼做 | 動到什麼 |
+| --- | --- | --- |
+| **只撤銷某一個 task**，其他 task 的成果保留 | 在「現在」的清單點那一項 → **撤銷這個 task** | 只有它進行時改的檔案回到它開始前；後來別的 task 也改過的檔案不硬蓋，會把這個 task 的 diff 交給 Claude，請它只拿掉那部分。task 變回 ☐ |
+| **某一步之後全部不要**，但保留對話 | 在歷程點那一步 → **整段回到這一步** | 清單回到那一步，之後用 Edit／Write 改過的檔案全部還原（之後才新增的會刪掉） |
+| **某一步之後全部不要**，連對話一起 | Claude Code 的 rewind（按兩下 Esc） | 對話和程式碼由 rewind 處理；todo-history 會在幾秒內偵測到，把清單自動跟著回到那時候（記一筆 `↶ rewind`） |
 
-還原前會先列出要動的檔案讓你確認，並先記一步「📌 回到 #n 之前的狀態」（連同要被覆寫的檔案），按錯了就回到那一步撤銷。還原後，你下一則訊息會自動告訴 Claude 現在的清單和哪些檔案被還原。用 Bash／PowerShell 改的檔案不會被記錄。歷程和檔案備份存在 `~/.claude/todo-history/<session id>/`。
+前兩種都會先記一步「📌 …之前的狀態」並備份要動的檔案，按錯了就回到那一步反悔；完成後你下一則訊息會自動告訴 Claude 發生了什麼。歷程裡也會列出 sub-agent 和 fork 的開始與結果（🤖／⑂）。
+
+用 Bash／PowerShell 改的檔案不會被記錄。rewind 是靠比對對話判斷的（變短、而且前面的訊息一模一樣才算；`/compact` 不會被誤認）。歷程和檔案備份存在 `~/.claude/todo-history/<session id>/`。
 
 指令：`/todos` 打開 panel，`/todos clear` 清掉這個 session 的歷程。
 

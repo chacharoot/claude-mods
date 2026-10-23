@@ -15,6 +15,11 @@ export type Snapshot = {
   note: string
   // Set on a snapshot a restore wrote: the step it went back to.
   restoredFrom?: number
+  // The main conversation's length when it was taken, and the compaction epoch that
+  // length counts in: a rewind to message m brings the list back to the last step
+  // taken at m or before. Absent on agents' lists, which no rewind of the main one moves.
+  msgs?: number
+  epoch?: number
 }
 
 // A file's content before the first edit to it after a snapshot: what restoring to
@@ -29,15 +34,37 @@ export type Change = {
   blob: string | null
 }
 
-// `pending`: what the model is told with the next prompt after a restore.
-export type History = { snapshots: Snapshot[]; changes: Change[]; blobs: number; pending: string[] }
+// A sub-agent or fork starting or ending, shown in the main timeline among the steps.
+export type AgentEvent = {
+  n: number
+  at: number
+  agentId: string
+  kind: 'spawn' | 'done' | 'failed'
+  fork: boolean
+  text: string
+}
 
-export type Confirm = { n: number; withFiles: boolean }
+// `pending`: what the model is told with the next prompt after a restore.
+// `epoch` counts compactions, which shorten the conversation without being a rewind.
+export type History = {
+  snapshots: Snapshot[]
+  changes: Change[]
+  events: AgentEvent[]
+  blobs: number
+  pending: string[]
+  epoch: number
+}
+
+export type Confirm =
+  | { kind: 'restore'; n: number; withFiles: boolean }
+  | { kind: 'revert'; key: string }
 
 export type View = {
   owner: Owner
-  // The snapshot whose detail is open, and a restore waiting for its yes.
+  // The snapshot whose detail is open, the current item whose task panel is open,
+  // and an action waiting for its yes.
   open: number | null
+  task: string | null
   confirm: Confirm | null
   note: string | null
 }

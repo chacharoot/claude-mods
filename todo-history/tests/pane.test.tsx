@@ -298,3 +298,147 @@ test('without a todo tool of the engine, it serves its own, and a restore applie
   expect(told.context?.join('\n')).toMatch(/rolled the todo list back to step #1 with the todo-history mod\. The list is now:\n- \[in_progress\] Read the spec/)
   await ui.unmount()
 })
+
+// A session with the conversation, prompts and the todo tool calls observable.
+async function rig2($: Parameters<Parameters<typeof test>[1]>[0], on: Parameters<Parameters<typeof test>[1]>[1]) {
+  const files = new Map<string, string>()
+  const edits: string[] = []
+  const messages: { role: 'user' | 'assistant'; text: string; toolUses: [] }[] = [{ role: 'user', text: 'start', toolUses: [] }]
+  const submitted: string[] = []
+  const written: unknown[] = []
+  on('command.register', () => ({ value: { command: 'todos' } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('session.id', () => ({ value: 's6' }))
+  on('session.messages', () => ({ value: [...messages] }))
+  on('agent.list', () => ({ value: [] }))
+  on('agent.spawn', () => ({ model: 'haiku', agentId: 'ag1' }))
+  on('turn.complete', () => ({ text: '' }))
+  on('env.get', (_, e) => ({ value: e.name === 'USERPROFILE' ? 'C:/Users/amy' : undefined }))
+  on('fs.read', (_, e) => {
+    const text = files.get(key(e.path))
+    if (text === undefined) throw new Error('ENOENT')
+    return { value: text }
+  })
+  on('fs.write', (_, e) => (files.set(key(e.path), e.text), { value: undefined }))
+  on('fs.exists', (_, e) => ({ value: files.has(key(e.path)) }))
+  on('prompt.submit', (_, e) => (submitted.push(e.text), { text: e.text, context: e.context }))
+  on('tool.call', (_, e) => {
+    // Each edit leaves the content the test queued for it.
+    if (e.tool === 'Edit' || e.tool === 'Write') files.set(key(e.file_path), edits.shift() ?? 'edited')
+    if (e.tool === 'TodoWrite') written.push(e.todos)
+    return { result: {} }
+  })
+  const clock = mock.clock(on)
+  await $.session.start({ cwd: 'C:/proj', surface: 'terminal', isInteractive: true })
+  // The conversation goes on by two messages, then the poll looks.
+  const talk = async (text: string) => {
+    messages.push({ role: 'assistant', text: `on ${text}`, toolUses: [] }, { role: 'user', text, toolUses: [] })
+    await clock.advance(3000)
+  }
+  return { files, edits, messages, submitted, written, clock, talk }
+}
+
+const list = (...items: [string, 'pending' | 'in_progress' | 'completed'][]) => ({ tool: 'TodoWrite' as const, todos: todos(...items) })
+
+test('undoing one task restores only its files and keeps the other tasks work', async ($, on) => {
+  const { files, edits, written } = await rig2($, on)
+  files.set('C:/proj/a.ts', 'A0')
+  files.set('C:/proj/b.ts', 'B0')
+  await $.tool.call(list(['Parser', 'in_progress'], ['Docs', 'pending']))
+  edits.push('A1')
+  await $.tool.call(edit('C:/proj/a.ts'))
+  await $.tool.call(list(['Parser', 'completed'], ['Docs', 'in_progress']))
+  edits.push('B1')
+  await $.tool.call(edit('C:/proj/b.ts'))
+  await $.tool.call(list(['Parser', 'completed'], ['Docs', 'completed']))
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'item-0' })
+  expect(await ui.find({ type: 'Text', text: /✎ a\.ts/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /b\.ts/ })).toBeUndefined()
+  await ui.press({ key: 'revert-btn' })
+  await ui.press({ key: 'yes' })
+
+  expect(files.get('C:/proj/a.ts')).toBe('A0')
+  expect(files.get('C:/proj/b.ts')).toBe('B1')
+  expect(written.at(-1)).toEqual(todos(['Parser', 'pending'], ['Docs', 'completed']))
+  expect(await ui.find({ type: 'Text', text: /↩ 撤銷「Parser」/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /已撤銷「Parser」，還原 1 個檔案（要反悔就回到 #4）/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a file later work edited too is not overwritten: Claude gets the task diff to take out', async ($, on) => {
+  const { files, edits, submitted } = await rig2($, on)
+  files.set('C:/proj/a.ts', 'one\ntwo')
+  await $.tool.call(list(['Add three', 'in_progress'], ['Add four', 'pending']))
+  edits.push('one\ntwo\nthree')
+  await $.tool.call(edit('C:/proj/a.ts'))
+  await $.tool.call(list(['Add three', 'completed'], ['Add four', 'in_progress']))
+  edits.push('one\ntwo\nthree\nfour')
+  await $.tool.call(edit('C:/proj/a.ts'))
+  await $.tool.call(list(['Add three', 'completed'], ['Add four', 'completed']))
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'item-0' })
+  expect(await ui.find({ type: 'Text', text: /⚠ 之後又被改過/ })).toBeDefined()
+  await ui.press({ key: 'revert-btn' })
+  await ui.press({ key: 'yes' })
+
+  expect(files.get('C:/proj/a.ts')).toBe('one\ntwo\nthree\nfour')
+  expect(submitted).toHaveLength(1)
+  expect(submitted[0]).toMatch(/task「Add three」/)
+  expect(submitted[0]).toMatch(/C:\/proj\/a\.ts[\s\S]*```diff[\s\S]* two\n\+three/)
+  expect(submitted[0]).not.toMatch(/\+four/)
+  expect(await ui.find({ type: 'Text', text: /1 個交給 Claude 處理/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a rewind of the conversation brings the list back to where it stood then', async ($, on) => {
+  const { messages, written, talk, clock } = await rig2($, on)
+  await $.tool.call(list(['Read spec', 'in_progress'], ['Write code', 'pending']))
+  await talk('next')
+  await $.tool.call(list(['Read spec', 'completed'], ['Write code', 'in_progress']))
+  await talk('more')
+  await $.tool.call(list(['Read spec', 'completed'], ['Write code', 'completed']))
+  await talk('done')
+
+  // Esc Esc back to before the prompt "next": it and everything after it are gone.
+  messages.splice(2)
+  await clock.advance(3000)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /↶ rewind：對話回到第 2 則 → 清單回到 #1/ })).toBeDefined()
+  expect(written.at(-1)).toEqual(todos(['Read spec', 'in_progress'], ['Write code', 'pending']))
+  await ui.unmount()
+})
+
+test('a compaction shortens the conversation without being taken for a rewind', async ($, on) => {
+  const { messages, written, talk, clock } = await rig2($, on)
+  await $.tool.call(list(['Only step', 'in_progress']))
+  await talk('a')
+  await talk('b')
+  const before = written.length
+  // The opening is replaced by a summary: shorter, but not the same opening.
+  messages.splice(0, messages.length, { role: 'user', text: 'Summary of the conversation so far', toolUses: [] })
+  await clock.advance(3000)
+  expect(written.length).toBe(before)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /rewind/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('agents and forks starting and ending show in the main timeline', async ($, on) => {
+  await rig2($, on)
+  await $.tool.call(list(['Search', 'in_progress']))
+  await $.agent.spawn({
+    prompt: 'look', description: 'Find the config', subagentType: 'Explore', tool_use_id: 't1',
+    provider: { plugin: 'engine', tier: 'core' }, parentModel: 'opus', background: true, fork: false,
+  } as never)
+  await $.turn.complete({ answer: 'found it in a.json', durationMs: 1, isAborted: false, turnId: 'x', agentId: 'ag1', reason: 'answer' } as never)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /🤖 agent「Find the config」開始/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /✓ 🤖 agent「Find the config：found it in a\.json」/ })).toBeDefined()
+  await ui.unmount()
+})

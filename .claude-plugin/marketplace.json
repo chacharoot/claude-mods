@@ -17,7 +17,7 @@
     {
       "name": "todo-history",
       "source": "./todo-history",
-      "description": "A pane with the full history of the todo list and tasks, and a way back: restore the list, and the files edited since, to any earlier step"
+      "description": "A pane with the history of the todo list, tasks and agents: undo one task and keep the rest, roll back to any step, and follow a rewind of the conversation"
     }
   ],
   "description": "Claude Code mods: a session manager pane, an animated sub-agent pane and a todo history with rollback"
