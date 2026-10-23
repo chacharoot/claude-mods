@@ -35,6 +35,7 @@ Claude Code 的三個 mod（hooks-module plugin），都會在對話旁邊開一
 列出這台機器上所有的 Claude Code session，依資料夾分組，可以用滑鼠點選。
 
 - 搜尋：打字即時篩選 title／資料夾／prompt，按 Enter 搜所有對話內文
+- 預覽：搜尋後每個 session 列出每一處命中（誰說的、什麼時候）；點一處看它前後的對話，命中的字會標亮，`j`／`k` 換下一處、上一處，`m` 多看幾則。沒搜尋時按「預覽對話」（`p`）看最後幾則，用來分辨長得像的 session
 - 點一個 session 展開詳細資料：
   - 已開著的 → **跳過去**（Terminal、iTerm 會直接切到那個分頁；Warp 只能叫出 app）
   - 背景 session（`/fork` 或 `--bg` 開的，沒有自己的視窗）→ **打開**，在新分頁執行 `claude attach` 進到那個對話；在空白輸入框按 ← 離開，它會繼續在背景

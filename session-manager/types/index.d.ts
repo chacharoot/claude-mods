@@ -27,7 +27,18 @@ export type LiveInfo = {
 // Where the scanner runs, and the terminal apps it can open a session in.
 export type Host = { platform: 'mac' | 'win'; apps: string[] }
 
-export type ContentHit = { id: string; hits: number; snippet: string }
+// One place a search matched: the transcript line, who wrote it, and the words around it.
+export type Match = { line: number; role: 'user' | 'assistant'; ts: string; snippet: string }
+
+// `matches` holds the first 20; older scans had only `snippet`.
+export type ContentHit = { id: string; hits: number; snippet: string; matches?: Match[] }
+
+// A run of one role's messages, joined, as the preview shows it.
+export type PreviewMessage = { line: number; end: number; role: 'user' | 'assistant'; ts: string; text: string; isHit: boolean }
+
+// The conversation around one match (`at` its index in the hit's matches), or the
+// session's last messages (`at` -1).
+export type Preview = { id: string; at: number; radius: number; messages: PreviewMessage[]; total: number }
 
 // One rate-limit window of the account, as the last API response reported it.
 export type Limit = { kind: string; percentUsed: number; resetsAt?: string }
@@ -43,6 +54,9 @@ export type View = {
   // Content search results for `query`, keyed by session id; null until searched.
   hits: Record<string, ContentHit> | null
   selected: string | null
+  // Every match of the selected session listed, not only the first few.
+  allMatches: boolean
+  preview: Preview | null
   mode: Mode
   busy: string | null
   note: string | null

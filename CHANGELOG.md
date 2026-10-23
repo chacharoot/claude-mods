@@ -1,5 +1,11 @@
 # Changelog
 
+## session-manager 0.3.0
+- **預覽對話**：搜尋內文後，每個 session 列出每一處命中（前 20 處，先顯示 5 處），標出是你還是 Claude 說的、什麼時候。點一處就在卡片裡展開它前後的對話，命中的那則標「◀ 命中」、關鍵字標亮；`j`／`k` 換下一處／上一處，`m` 多看幾則，`z` 收起。
+- 沒有搜尋時，卡片的「預覽對話」（`p`）顯示這個 session 最後幾則對話，用來分辨長得像的候選。
+- Claude 一次回覆中間穿插工具呼叫時，預覽會把它合成一則，對話依「你／Claude」交替顯示。
+- Python 和 PowerShell 兩個 scanner 都加了 `context` 模式，`search` 也回傳每一處命中的位置。
+
 ## session-manager 0.2.5
 - **修正**：和 session-monitor 這類也用 `/sessions` 的 mod 一起裝時，指令撞名會讓 session-manager 整個啟動失敗、panel 不出現。現在一律註冊 `/session-manager`，`/sessions` 只在沒被佔用時才註冊，也不會攔截別人的 `/sessions`。
 - panel 分頁標題改成「Session Manager」，跟其他 session 類 mod 分得開。

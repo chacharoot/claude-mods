@@ -3,7 +3,8 @@
 // Runs on macOS and Windows; stdout stays ASCII (JSON escapes) so a Windows
 // console code page cannot break it.
 //   index <projects> <cache>          {rows, live, platform, apps}
-//   search <projects> <query>         ContentHit[]
+//   search <projects> <query>         ContentHit[] (each with its first MAX_MATCHES matches)
+//   context <path> <line> <radius>    {messages: PreviewMessage[]} around a line; -1 for the end
 //   rename <path> <id> <title>        {ok}
 //   trash <path>                      {ok, msg}
 //   open <app> <cwd> <command>        {ok, msg}
@@ -172,13 +173,19 @@ def index(root, cache_path):
     rows.sort(key=lambda r: -r["updated"])
     print(json.dumps({"rows": rows, "live": live(), "platform": "win" if WIN else "mac", "apps": apps()}))
 
+MAX_MATCHES = 20
+
+def clip_around(t, i, n):
+    s = " ".join(t[max(0, i - 40): i + n + 80].split())
+    return ("…" if i > 40 else "") + s
+
 def search(root, query):
     q = query.casefold()
     out = []
     for p in files(root):
-        hits, snippet = 0, ""
+        hits, matches = 0, []
         with open(p, "r", encoding="utf-8", errors="replace") as f:
-            for line in f:
+            for no, line in enumerate(f):
                 if '"type":"user"' not in line and '"type":"assistant"' not in line:
                     continue
                 if q not in line.casefold():
@@ -187,19 +194,63 @@ def search(root, query):
                     o = json.loads(line)
                 except Exception:
                     continue
-                if o.get("type") not in ("user", "assistant") or o.get("isSidechain"):
+                if o.get("type") not in ("user", "assistant") or o.get("isSidechain") or o.get("isMeta"):
                     continue
                 for t in texts((o.get("message") or {}).get("content")):
                     i = t.casefold().find(q)
                     if i < 0:
                         continue
                     hits += 1
-                    if not snippet:
-                        s = " ".join(t[max(0, i - 40): i + len(q) + 80].split())
-                        snippet = ("\u2026" if i > 40 else "") + s
+                    if len(matches) < MAX_MATCHES:
+                        matches.append({"line": no, "role": o["type"], "ts": o.get("timestamp") or "",
+                                        "snippet": clip_around(t, i, len(q))})
         if hits:
-            out.append({"id": os.path.basename(p)[:-6], "hits": hits, "snippet": snippet})
+            out.append({"id": os.path.basename(p)[:-6], "hits": hits,
+                        "snippet": matches[0]["snippet"] if matches else "", "matches": matches})
     print(json.dumps(out))
+
+def visible(o):
+    # What a person reads of a row: a prompt, or Claude's text; tool traffic is left out.
+    if o.get("type") not in ("user", "assistant") or o.get("isSidechain") or o.get("isMeta"):
+        return None
+    text = "\n".join(t for t in texts((o.get("message") or {}).get("content")) if t.strip()).strip()
+    if not text or (o["type"] == "user" and text.startswith("<")):
+        return None
+    return text
+
+LIMIT = 1200
+
+def context(path, line, radius):
+    line, radius = int(line), max(1, int(radius))
+    msgs = []
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+        for no, raw in enumerate(f):
+            if '"type":"user"' not in raw and '"type":"assistant"' not in raw:
+                continue
+            try:
+                o = json.loads(raw)
+            except Exception:
+                continue
+            text = visible(o)
+            if text is None:
+                continue
+            # One reply split around tool calls reads as one message: join a run of one role.
+            if msgs and msgs[-1]["role"] == o["type"]:
+                last = msgs[-1]
+                last["text"] = (last["text"] + "\n" + text)[:LIMIT]
+                last["end"] = no
+            else:
+                msgs.append({"line": no, "end": no, "role": o["type"], "ts": o.get("timestamp") or "",
+                             "text": text[:LIMIT]})
+    if line < 0:
+        at = -1
+        part = msgs[max(0, len(msgs) - radius * 2):]
+    else:
+        at = next((k for k, m in enumerate(msgs) if m["end"] >= line), len(msgs) - 1)
+        part = msgs[max(0, at - radius): at + radius + 1]
+    for m in part:
+        m["isHit"] = at >= 0 and m is msgs[at]
+    print(json.dumps({"messages": part, "total": len(msgs)}))
 
 def rename(path, sid, title):
     # The same record /rename appends; the newest custom title wins.
@@ -323,6 +374,8 @@ if mode == "index":
     index(os.path.expanduser(args[0]), os.path.expanduser(args[1]))
 elif mode == "search":
     search(os.path.expanduser(args[0]), args[1])
+elif mode == "context":
+    context(args[0], args[1], args[2])
 elif mode == "rename":
     rename(*args)
 elif mode == "trash":

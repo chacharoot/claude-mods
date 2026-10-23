@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { ContentHit, Host, Limit, LiveInfo, Mode, SessionRow, View } from '../types'
+import type { ContentHit, Host, Limit, LiveInfo, Match, Mode, Preview, PreviewMessage, SessionRow, View } from '../types'
 import { SCANNER } from './scanner'
 
 const PANE = 'session-manager'
@@ -11,7 +11,8 @@ const CACHE = '~/.claude/session-manager/index.json'
 const LIMIT = 80
 const POLL_MS = 20_000
 
-const EMPTY: View = { query: '', hits: null, selected: null, mode: null, busy: null, note: null }
+const EMPTY: View = { query: '', hits: null, selected: null, allMatches: false, preview: null, mode: null, busy: null, note: null }
+const SHOWN_MATCHES = 5
 const sessions = atom({ plugin: 'session-manager', key: 'sessions' } as const, [])
 const live = atom({ plugin: 'session-manager', key: 'live' } as const, {})
 const view = atom({ plugin: 'session-manager', key: 'view' } as const, EMPTY)
@@ -109,6 +110,18 @@ async function setView($: EngineInterface, patch: Partial<View>) {
 }
 const say = ($: EngineInterface, note: string) => setView($, { busy: null, note })
 
+// The conversation around match `at` of the session's hit, or its last messages (`at` -1).
+async function showPreview($: EngineInterface, row: SessionRow, at: number, radius = 2) {
+  const match = at >= 0 ? (await read($, view)).hits?.[row.id]?.matches?.[at] : undefined
+  if (at >= 0 && !match) return
+  await setView($, { busy: '讀取對話…', note: null })
+  const found = await python<{ messages: PreviewMessage[]; total: number }>($, [
+    'context', row.path, String(match ? match.line : -1), String(radius),
+  ])
+  const preview: Preview = { id: row.id, at, radius, messages: found.messages, total: found.total }
+  await setView($, { busy: null, preview })
+}
+
 async function refresh($: EngineInterface, quiet = false) {
   if (!quiet) await setView($, { busy: '索引中…', note: null })
   try {
@@ -135,6 +148,7 @@ async function searchContent($: EngineInterface, query: string) {
     await setView($, {
       busy: null,
       hits: Object.fromEntries(found.map(hit => [hit.id, hit])),
+      preview: null,
       note: `內文命中 ${found.length} 個 session`,
     })
   } catch (err) {
@@ -304,6 +318,81 @@ export const register: Register = on => {
       </Text>
     )
 
+    const stamp = (ts: string) => ts.replace('T', ' ').slice(5, 16)
+    const who = (role: Match['role']) => (role === 'user' ? '你' : 'Claude')
+
+    // The query lit up wherever it falls in a text.
+    const lit = (text: string) => {
+      const needle = v.query.trim().toLowerCase()
+      if (!needle || !v.hits) return text
+      const out: (string | ReturnType<typeof Text>)[] = []
+      let from = 0
+      for (let i = text.toLowerCase().indexOf(needle); i >= 0; i = text.toLowerCase().indexOf(needle, i + needle.length)) {
+        out.push(text.slice(from, i))
+        out.push(<Text color="warning" bold>{text.slice(i, i + needle.length)}</Text>)
+        from = i + needle.length
+      }
+      out.push(text.slice(from))
+      return out
+    }
+
+    const matchList = (row: SessionRow, hit: ContentHit) => {
+      const all = hit.matches ?? []
+      const list = v.allMatches ? all : all.slice(0, SHOWN_MATCHES)
+      return (
+        <Box flexDirection="column">
+          <Text>
+            <Text color="claude">{fit('命中', 6)}</Text>
+            <Text color="warning">{`${hit.hits} 處`}</Text>
+            <Text dimColor>{all.length < hit.hits ? `（列出前 ${all.length} 處）` : ''} · 點一處看前後對話</Text>
+          </Text>
+          {all.length === 0 && <Text dimColor>{clip(hit.snippet, cardInner)}</Text>}
+          {list.map((m, i) => {
+            const isOn = v.preview?.id === row.id && v.preview.at === i
+            const head = `${isOn ? '▸' : ' '} ${fit(who(m.role), 6)} ${stamp(m.ts)}  `
+            return (
+              <Button key={`m-${row.id}-${i}`} plain onPress={() => attempt($, '預覽', () => showPreview($, row, i))}>
+                <Text color={isOn ? 'claude' : m.role === 'user' ? 'claude' : 'success'} bold={isOn}>{head}</Text>
+                <Text dimColor={!isOn}>{lit(clip(m.snippet, cardInner - cells(head)))}</Text>
+              </Button>
+            )
+          })}
+          {all.length > SHOWN_MATCHES && (
+            <Button key={`more-${row.id}`} plain dimColor label={v.allMatches ? '  ▴ 收起' : `  ▾ 再列 ${all.length - SHOWN_MATCHES} 處`}
+              onPress={() => void setView($, { allMatches: !v.allMatches })} />
+          )}
+        </Box>
+      )
+    }
+
+    const previewBox = (row: SessionRow, p: Preview) => {
+      const count = v.hits?.[row.id]?.matches?.length ?? 0
+      const title = p.at >= 0 ? `預覽 · 第 ${p.at + 1}/${count} 處` : `預覽 · 最後 ${p.messages.length} 則（共 ${p.total} 則）`
+      const width = cardInner - 4
+      return (
+        <Box flexDirection="column" borderStyle="single" borderColor="subtle" paddingX={1}>
+          <Text bold color="claude">{title}</Text>
+          {p.messages.map((m, i) => (
+            <Box key={`pm-${i}`} flexDirection="column" marginTop={i ? 1 : 0}>
+              <Text>
+                <Text bold color={m.role === 'user' ? 'claude' : 'success'}>{who(m.role)}</Text>
+                <Text dimColor>{`  ${stamp(m.ts)}`}</Text>
+                {m.isHit && <Text color="warning">{'  ◀ 命中'}</Text>}
+              </Text>
+              <Text wrap="wrap" dimColor={!m.isHit}>{lit(clip(m.text, m.isHit ? width * 8 : width * 3))}</Text>
+            </Box>
+          ))}
+          <Text color="subtle">{'┄'.repeat(width)}</Text>
+          <Box flexDirection="row" gap={1} flexWrap="wrap">
+            {p.at > 0 && <Button key="prev-match" label="↑ 上一處" hotkey="k" onPress={() => attempt($, '預覽', () => showPreview($, row, p.at - 1))} />}
+            {p.at >= 0 && p.at < count - 1 && <Button key="next-match" label="↓ 下一處" hotkey="j" onPress={() => attempt($, '預覽', () => showPreview($, row, p.at + 1))} />}
+            <Button key="more-context" label="多看幾則" hotkey="m" onPress={() => attempt($, '預覽', () => showPreview($, row, p.at, p.radius + 3))} />
+            <Button key="close-preview" label="收起" hotkey="z" onPress={() => void setView($, { preview: null })} />
+          </Box>
+        </Box>
+      )
+    }
+
     const card = (row: SessionRow) => {
       const info = alive[row.id]
       const isMe = row.id === me
@@ -320,7 +409,8 @@ export const register: Register = on => {
           <Text color="subtle">{'┄'.repeat(cardInner)}</Text>
           {field('首句', row.firstPrompt || '-', 'text')}
           {row.lastPrompt !== row.firstPrompt && field('末句', row.lastPrompt || '-', 'text')}
-          {hit && field('命中', hit.snippet, 'warning')}
+          {hit && matchList(row, hit)}
+          {v.preview?.id === row.id && previewBox(row, v.preview)}
           <Text color="subtle">{'┄'.repeat(cardInner)}</Text>
           {mode?.kind === 'rename' && mode.id === row.id && Input ? (
             <Box flexDirection="column">
@@ -339,6 +429,9 @@ export const register: Register = on => {
               {!isMe && (
                 <Button key={`jump-${row.id}`} label={info?.kind === 'bg' ? '打開' : info ? '跳過去' : 'Resume'} hotkey="t" variant="primary"
                   onPress={() => attempt($, info ? '切換' : 'Resume', () => jump($, row))} />
+              )}
+              {v.preview?.id !== row.id && (
+                <Button key={`peek-${row.id}`} label="預覽對話" hotkey="p" onPress={() => attempt($, '預覽', () => showPreview($, row, -1))} />
               )}
               <Button key={`rename-btn-${row.id}`} label="改名" hotkey="e"
                 onPress={() => void setView($, { mode: { kind: 'rename', id: row.id } })} />
@@ -455,7 +548,7 @@ export const register: Register = on => {
               return (
                 <Box key={`item-${row.id}`} flexDirection="column">
                   <Button key={`row-${row.id}`} plain
-                    onPress={() => void setView($, { selected: isOpen ? null : row.id, mode: null })}>
+                    onPress={() => void setView($, { selected: isOpen ? null : row.id, mode: null, preview: null, allMatches: false })}>
                     <Text color={isMe ? 'claude' : info ? 'success' : 'subtle'}>{isMe ? '◆ ' : info ? '● ' : '○ '}</Text>
                     <Text bold={isOpen} color={isOpen ? 'claude' : undefined}>{fit(row.title, inner - 2 - 7)}</Text>
                     <Text dimColor>{fit(tail.padStart(7), 7)}</Text>

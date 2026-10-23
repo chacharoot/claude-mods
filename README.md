@@ -37,6 +37,7 @@ The panes' labels are in Traditional Chinese.
 Lists every Claude Code session on this machine, grouped by folder, clickable.
 
 - Search: type to filter by title, folder or prompt; Enter searches the content of every conversation
+- Preview: after a search each session lists every match (who wrote it, and when); press one to read the conversation around it with the words lit up, `j`/`k` for the next and previous match, `m` for more of it. Without a search, Preview (`p`) shows a session's last messages, to tell look-alike sessions apart
 - Press a session to expand its details:
   - Open in a terminal → **Jump** (Terminal and iTerm switch to its tab; Warp only brings the app forward)
   - A background session (started by `/fork` or `--bg`, with no window of its own) → **Open**: runs `claude attach` in a new tab to enter it; press ← on an empty prompt to leave, and it keeps running in the background

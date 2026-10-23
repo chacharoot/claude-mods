@@ -270,3 +270,64 @@ test('another plugin holding /sessions neither stops the pane nor loses its own 
   // Let the refresh the open started finish inside the test.
   await clock.settle()
 })
+
+test('lists each match of a search, and previews the conversation around one', async ($, on) => {
+  const contexts: string[][] = []
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('session.id', () => ({ value: 'me' }))
+  const clock = mock.clock(on)
+  mock.store(on)
+  const match = (line: number, role: string, snippet: string) => ({ line, role, ts: `2026-10-0${line}T10:0${line}:00Z`, snippet })
+  const msg = (line: number, role: string, text: string, isHit = false) => ({ line, end: line, role, ts: '2026-10-01T09:00:00Z', text, isHit })
+  on('process.run', (_, e) => {
+    const args = e.argv.slice(3)
+    const out =
+      args[0] === 'index'
+        ? { rows: [ROW('s1', 'Fly brain', '/work/a'), ROW('s2', 'Raiden', '/work/b')], live: {}, platform: 'mac', apps: ['Terminal'] }
+        : args[0] === 'search'
+          ? [{ id: 's1', hits: 7, snippet: 'neurons one', matches: [1, 2, 3, 4, 5, 6, 7].map(n => match(n, n % 2 ? 'user' : 'assistant', `neurons ${n}`)) }]
+          : args[0] === 'context'
+            ? (contexts.push(args.slice(1)),
+              args[2] === '-1'
+                ? { messages: [msg(8, 'user', 'last question'), msg(9, 'assistant', 'last answer')], total: 30 }
+                : { messages: [msg(1, 'user', 'before it'), msg(Number(args[2]), 'assistant', `the neurons at ${args[2]}`, true), msg(9, 'user', 'after it')], total: 30 })
+            : { ok: true, msg: '' }
+    return { value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+
+  await $.session.start({ cwd: '/work/a', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+
+  await ui.input({ key: 'query', text: 'neurons' })
+  await ui.press({ key: 'row-s1' })
+  // Five matches listed, each saying who wrote it; the rest a press away.
+  expect(await ui.find({ type: 'Button', key: 'm-s1-4' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'm-s1-5' })).toBeUndefined()
+  await ui.press({ key: 'more-s1' })
+  expect(await ui.find({ type: 'Button', key: 'm-s1-6' })).toBeDefined()
+
+  await ui.press({ key: 'm-s1-2' })
+  expect(contexts.at(-1)).toEqual(['/p/s1.jsonl', '3', '2'])
+  expect(await ui.find({ type: 'Text', text: /第 3\/7 處/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /◀ 命中/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /before it/ })).toBeDefined()
+
+  await ui.press({ key: 'next-match' })
+  expect(contexts.at(-1)).toEqual(['/p/s1.jsonl', '4', '2'])
+  await ui.press({ key: 'more-context' })
+  expect(contexts.at(-1)).toEqual(['/p/s1.jsonl', '4', '5'])
+  await ui.press({ key: 'close-preview' })
+  expect(await ui.find({ type: 'Text', text: /預覽 ·/ })).toBeUndefined()
+
+  // With no search, a session's last messages.
+  await ui.press({ key: 'clear' })
+  await ui.press({ key: 'row-s2' })
+  await ui.press({ key: 'peek-s2' })
+  expect(contexts.at(-1)).toEqual(['/p/s2.jsonl', '-1', '2'])
+  expect(await ui.find({ type: 'Text', text: /最後 2 則（共 30 則）/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /last answer/ })).toBeDefined()
+  await ui.unmount()
+})

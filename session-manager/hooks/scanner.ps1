@@ -2,7 +2,8 @@
 # no Python (often only the Store stub of it): the same modes, arguments and JSON
 # on stdout, kept ASCII (\u escapes) so the console code page cannot break it.
 #   index <projects> <cache>          {rows, live, platform, apps}
-#   search <projects> <query>         ContentHit[]
+#   search <projects> <query>         ContentHit[] (each with its first 20 matches)
+#   context <path> <line> <radius>    {messages, total} around a line; -1 for the end
 #   rename <path> <id> <title>        {ok}
 #   trash <path>                      {ok, msg}
 #   open <app> <cwd> <command>        {ok, msg}
@@ -182,30 +183,88 @@ function Invoke-Index([string]$root, [string]$cachePath) {
     Write-Json @{ rows = $sorted; live = (Get-Live); platform = 'win'; apps = (Get-Apps) }
 }
 
+$maxMatches = 20
+$previewLimit = 1200
+
+function Get-Around([string]$t, [int]$i, [int]$n) {
+    $from = [Math]::Max(0, $i - 40)
+    $s = Get-Words $t.Substring($from, [Math]::Min($t.Length, $i + $n + 80) - $from)
+    $(if ($i -gt 40) { [string][char]0x2026 } else { '' }) + $s
+}
+
 function Invoke-Search([string]$root, [string]$query) {
     $out = New-Object System.Collections.Generic.List[object]
     $ci = [StringComparison]::OrdinalIgnoreCase
     foreach ($f in Get-Transcripts $root) {
-        $hits = 0; $snippet = ''
+        $hits = 0; $no = -1
+        $found = New-Object System.Collections.Generic.List[object]
         foreach ($line in Get-Lines $f.FullName) {
+            $no++
             if (-not $line.Contains('"type":"user"') -and -not $line.Contains('"type":"assistant"')) { continue }
             if ($line.IndexOf($query, $ci) -lt 0) { continue }
             $o = Read-Json $line
-            if ((Get-Field $o 'type') -notin 'user', 'assistant' -or (Get-Field $o 'isSidechain')) { continue }
+            $type = Get-Field $o 'type'
+            if ($type -notin 'user', 'assistant' -or (Get-Field $o 'isSidechain') -or (Get-Field $o 'isMeta')) { continue }
             foreach ($t in Get-Texts (Get-Field (Get-Field $o 'message') 'content')) {
                 $i = $t.IndexOf($query, $ci)
                 if ($i -lt 0) { continue }
                 $hits++
-                if (-not $snippet) {
-                    $from = [Math]::Max(0, $i - 40)
-                    $s = Get-Words $t.Substring($from, [Math]::Min($t.Length, $i + $query.Length + 80) - $from)
-                    $snippet = $(if ($i -gt 40) { [string][char]0x2026 } else { '' }) + $s
+                if ($found.Count -lt $maxMatches) {
+                    $found.Add(@{ line = $no; role = $type; ts = [string](Get-Field $o 'timestamp')
+                                    snippet = Get-Around $t $i $query.Length })
                 }
             }
         }
-        if ($hits) { $out.Add(@{ id = $f.BaseName; hits = $hits; snippet = $snippet }) }
+        if ($hits) {
+            $first = $(if ($found.Count) { $found[0].snippet } else { '' })
+            $out.Add(@{ id = $f.BaseName; hits = $hits; snippet = $first; matches = $found.ToArray() })
+        }
     }
     Write-Json $out.ToArray()
+}
+
+# What a person reads of a row: a prompt, or Claude's text; tool traffic is left out.
+function Get-Visible($o) {
+    $type = Get-Field $o 'type'
+    if ($type -notin 'user', 'assistant' -or (Get-Field $o 'isSidechain') -or (Get-Field $o 'isMeta')) { return $null }
+    $parts = @(Get-Texts (Get-Field (Get-Field $o 'message') 'content') | Where-Object { $_.Trim() })
+    $text = ($parts -join "`n").Trim()
+    if (-not $text -or ($type -eq 'user' -and $text.StartsWith('<'))) { return $null }
+    $text
+}
+
+function Invoke-Context([string]$path, [int]$line, [int]$radius) {
+    $radius = [Math]::Max(1, $radius)
+    $msgs = New-Object System.Collections.Generic.List[object]
+    $no = -1
+    foreach ($raw in Get-Lines $path) {
+        $no++
+        if (-not $raw.Contains('"type":"user"') -and -not $raw.Contains('"type":"assistant"')) { continue }
+        $o = Read-Json $raw
+        $text = Get-Visible $o
+        if ($null -eq $text) { continue }
+        $type = Get-Field $o 'type'
+        # One reply split around tool calls reads as one message: join a run of one role.
+        if ($msgs.Count -and $msgs[$msgs.Count - 1].role -eq $type) {
+            $last = $msgs[$msgs.Count - 1]
+            $last.text = Get-Head ($last.text + "`n" + $text) $previewLimit
+            $last.end = $no
+        } else {
+            $msgs.Add(@{ line = $no; end = $no; role = $type; ts = [string](Get-Field $o 'timestamp')
+                         text = Get-Head $text $previewLimit; isHit = $false })
+        }
+    }
+    $at = -1
+    if ($line -lt 0) {
+        $from = [Math]::Max(0, $msgs.Count - $radius * 2); $to = $msgs.Count - 1
+    } else {
+        $at = $msgs.Count - 1
+        for ($k = 0; $k -lt $msgs.Count; $k++) { if ($msgs[$k].end -ge $line) { $at = $k; break } }
+        $from = [Math]::Max(0, $at - $radius); $to = [Math]::Min($msgs.Count - 1, $at + $radius)
+    }
+    if ($at -ge 0) { $msgs[$at].isHit = $true }
+    $part = @(if ($msgs.Count) { for ($k = $from; $k -le $to; $k++) { $msgs[$k] } })
+    Write-Json @{ messages = $part; total = $msgs.Count }
 }
 
 function Invoke-Rename([string]$path, [string]$sid, [string]$title) {
@@ -279,6 +338,7 @@ $rest = @($args | Select-Object -Skip 1) + @('', '', '')
 switch ($mode) {
     'index' { Invoke-Index (Expand-Home $rest[0]) (Expand-Home $rest[1]) }
     'search' { Invoke-Search (Expand-Home $rest[0]) $rest[1] }
+    'context' { Invoke-Context $rest[0] ([int]$rest[1]) ([int]$rest[2]) }
     'rename' { Invoke-Rename $rest[0] $rest[1] $rest[2] }
     'trash' { Invoke-Trash $rest[0] }
     'open' { Invoke-Open $rest[0] $rest[1] $rest[2] }
