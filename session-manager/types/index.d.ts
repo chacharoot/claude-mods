@@ -27,6 +27,9 @@ export type Host = { platform: 'mac' | 'win'; apps: string[] }
 
 export type ContentHit = { id: string; hits: number; snippet: string }
 
+// One rate-limit window of the account, as the last API response reported it.
+export type Limit = { kind: string; percentUsed: number; resetsAt?: string }
+
 export type Mode =
   | { kind: 'rename'; id: string }
   | { kind: 'delete'; id: string }
@@ -52,6 +55,7 @@ declare module 'claude-code' {
       current: string
       app: string
       host: Host
+      limits: Limit[]
     }
   }
 }

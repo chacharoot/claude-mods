@@ -12,6 +12,7 @@ Claude Code 的兩個 mod（hooks-module plugin），都會在對話旁邊開一
   - 已關閉的 → **Resume**，在新視窗開（Warp／iTerm／Terminal，按 `a` 切換）
   - **改名**（寫入跟 `/rename` 一樣的記錄）、**複製指令**、**刪除**（移到垃圾桶，可救回）
 - **+ 新增**：選資料夾開新 session
+- 標題區下方顯示剩餘額度（5 小時、7 天）和多久後重置
 - 指令：`/sessions`
 
 需求：Python 3（用來讀超過 4MB 的 transcript；依序試 `python3`、`python`、`py -3`）。Windows 沒有 Python 時改用內建的 PowerShell 跑同樣的功能，不用另外安裝。

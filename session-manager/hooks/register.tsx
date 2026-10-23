@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { ContentHit, Host, LiveInfo, Mode, SessionRow, View } from '../types'
+import type { ContentHit, Host, Limit, LiveInfo, Mode, SessionRow, View } from '../types'
 import { SCANNER } from './scanner'
 
 const PANE = 'session-manager'
@@ -18,6 +18,20 @@ const view = atom({ plugin: 'session-manager', key: 'view' } as const, EMPTY)
 const current = atom({ plugin: 'session-manager', key: 'current' } as const, '')
 const appPref = atom({ plugin: 'session-manager', key: 'app' } as const, '')
 const host = atom({ plugin: 'session-manager', key: 'host' } as const, { platform: 'mac', apps: ['Terminal'] } as Host)
+const limits = atom({ plugin: 'session-manager', key: 'limits' } as const, [] as Limit[])
+
+const LIMIT_NAMES: Record<string, string> = { five_hour: '5 小時', seven_day: '7 天', spend_limit: '花費' }
+
+// Time until a window resets: `2h13m`, `3d4h`, `12m`.
+function until(iso: string | undefined, now: number) {
+  const at = iso ? Date.parse(iso) : NaN
+  if (Number.isNaN(at)) return ''
+  const m = Math.max(0, Math.ceil((at - now) / 60000))
+  if (m < 60) return `${m}m`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h${m % 60 ? `${m % 60}m` : ''}`
+  return `${Math.floor(h / 24)}d${h % 24 ? `${h % 24}h` : ''}`
+}
 
 // Terminal cells a string takes: CJK and emoji are two wide.
 const WIDE = /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]|[\ud800-\udbff]/
@@ -215,8 +229,17 @@ export const register: Register = on => {
     void $.ui.open({ id: PANE, title: TITLE })
     void refresh($)
     $.clock.every(POLL_MS, () => void refresh($, true))
+    void $.session.usage()
+      .then(usage => update($, limits, () => usage.rateLimits))
+      .catch(() => undefined)
 
     return done
+  })
+
+  // Pushed after each turn and whenever a window moves a whole point.
+  on('session.measure', async ($, e, next) => {
+    if (e.changed.includes('rateLimits')) await update($, limits, () => e.rateLimits)
+    return next(e)
   })
 
   on('command.run', { command: 'sessions' }, async $ => {
@@ -236,6 +259,7 @@ export const register: Register = on => {
     const me = await read($, current)
     const app = await chosenApp($)
     const { platform, apps } = await read($, host)
+    const quota = await read($, limits)
     const now = await $.clock.now()
     const W = Math.max(28, (e.props.bodyColumns ?? 50) - 1)
 
@@ -316,6 +340,26 @@ export const register: Register = on => {
       )
     }
 
+    // One row per rate-limit window: what is left of it, as a bar, and when it resets.
+    const quotaRow = (limit: Limit) => {
+      const left = Math.max(0, Math.round((100 - limit.percentUsed) * 10) / 10)
+      const color = left < 20 ? 'error' : left < 50 ? 'warning' : 'success'
+      const pct = ` 剩 ${left}%`.padStart(8)
+      const reset = until(limit.resetsAt, now)
+      const resetText = reset ? `${reset} 後重置`.padStart(13) : ''
+      const barWidth = Math.max(4, inner - 6 - cells(pct) - cells(resetText))
+      const filled = Math.round((barWidth * left) / 100)
+      return (
+        <Text key={`quota-${limit.kind}`}>
+          <Text color="claude">{fit(LIMIT_NAMES[limit.kind] ?? limit.kind, 6)}</Text>
+          <Text color={color}>{'█'.repeat(filled)}</Text>
+          <Text color="subtle">{'░'.repeat(barWidth - filled)}</Text>
+          <Text color={color}>{pct}</Text>
+          <Text dimColor>{resetText}</Text>
+        </Text>
+      )
+    }
+
     const status = v.busy ?? v.note ?? (q ? `符合 ${shown.length} 個` : '')
 
     return (
@@ -326,6 +370,9 @@ export const register: Register = on => {
             <Text dimColor>{spread('', `${rows.length} sessions · ${folders.length} 資料夾 · `, inner - 8 - cells(`${running} 開著`))}</Text>
             <Text color="success">{`${running} 開著`}</Text>
           </Text>
+          {quota.length > 0
+            ? quota.map(quotaRow)
+            : <Text dimColor>{clip('額度：訂閱帳號送出第一則訊息後顯示', inner)}</Text>}
           {Input && (
             <Input key="query" placeholder="搜 title／資料夾／prompt · Enter 搜內文" submitLabel="搜內文" value={v.query}
               onInput={(value: string) => void setView($, { query: value, hits: null, note: null })}

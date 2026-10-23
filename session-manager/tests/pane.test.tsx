@@ -161,3 +161,46 @@ test('on Windows with no Python: runs scanner.ps1, and a failed press says why',
   expect(calls.at(-1)?.slice(-4)).toEqual(['open', 'Windows Terminal', 'C:\work', 'claude'])
   await ui.unmount()
 })
+
+test('shows what is left of each rate-limit window, and follows session.measure', async ($, on) => {
+  on('command.register', () => ({ value: { command: 'sessions' } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('session.id', () => ({ value: 'me' }))
+  const clock = mock.clock(on)
+  mock.store(on)
+  const inTwoHours = new Date(2 * 3600_000 + 13 * 60_000).toISOString()
+  on('session.usage', () => ({
+    value: {
+      startedAt: 0,
+      context: { window: 200_000 },
+      rateLimits: [
+        { kind: 'five_hour', percentUsed: 32, resetsAt: inTwoHours },
+        { kind: 'seven_day', percentUsed: 85.5 },
+      ],
+    },
+  }))
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  on('process.run', () => ({
+    value: { exitCode: 0, stdout: JSON.stringify({ rows: [], live: {}, platform: 'win', apps: ['Windows Terminal'] }),
+             stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
+  }))
+
+  await $.session.start({ cwd: 'C:\work', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+
+  expect(await ui.find({ type: 'Text', text: /5 小時/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /剩 68%/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /2h13m 後重置/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /剩 14\.5%/ })).toBeDefined()
+
+  await $.session.measure({
+    context: { window: 200_000 },
+    rateLimits: [{ kind: 'five_hour', percentUsed: 90, resetsAt: inTwoHours }],
+    changed: ['rateLimits'],
+  })
+  expect(await ui.find({ type: 'Text', text: /剩 10%/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /7 天/ })).toBeUndefined()
+  await ui.unmount()
+})
