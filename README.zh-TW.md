@@ -6,7 +6,7 @@ Claude Code 的三個 mod（hooks-module plugin），都會在對話旁邊開一
 
 | Mod | 一句話 | 指令 |
 | --- | --- | --- |
-| **agent-zoo** | 每個 sub-agent／fork 都是一隻 3D 像素小機器人，點開看它即時在做什麼 | `/agent-zoo` |
+| **agent-zoo** | 每個 sub-agent／fork 都是一隻 3D 像素小機器人，點開看它即時在做什麼；agent teams 互傳的訊息像通訊軟體一樣顯示在下方 | `/agent-zoo` |
 | **todo-history** | todo 清單的完整歷程：單獨撤銷一個 task、整段回到某一步，rewind 時清單自動跟著回去 | `/todos` |
 | **session-manager** | 這台電腦所有 Claude Code session 的列表：搜尋、resume、打開背景 session，順便顯示剩餘額度 | `/session-manager` |
 
@@ -21,6 +21,10 @@ Claude Code 的三個 mod（hooks-module plugin），都會在對話旁邊開一
 **agent-zoo**：跑著的 agent 會跳、做完會笑；點「▸ 看進度」看它說了什麼、用了哪些工具。
 
 <img src="docs/agent-zoo.png" alt="agent-zoo：兩個完成的 agent，各自一隻像素機器人" width="480">
+
+**agent-zoo 的 TEAM CHAT**：lead（👑）的訊息在右，teammate 在左，每個人一個顏色和一隻動物頭像，長訊息點名字看全文。
+
+<img src="docs/agent-zoo-team-chat.png" alt="agent-zoo TEAM CHAT：lead、reviewer、scout 互傳訊息的氣泡" width="480">
 
 **todo-history**：「目前清單」看進度、點一項單獨撤銷；「歷程」看每一步、回到任一步，agent 和 fork 也在裡面。
 
@@ -64,7 +68,11 @@ Claude Code 的三個 mod（hooks-module plugin），都會在對話旁邊開一
 
 小機器人預設是 10×5 格；想要原本 18×9 的大隻，用 `/agent-zoo big`（`/agent-zoo small` 換回來，會記住）。
 
-**團隊對話**：用 agent teams 時，lead 和 teammate 之間用 SendMessage 傳的訊息會像通訊軟體一樣顯示在 zoo 下方的「TEAM CHAT」：lead 在右、teammate 在左，每個人有自己的顏色和一隻依名字挑的動物頭像（lead 是 👑），氣泡上標「誰 → 誰」和時間；點名字看全文，`c` 隱藏／顯示，「清空」清掉紀錄。只記得到在這個 Claude Code 程序裡跑的 agent（tmux 分割窗格的 teammate 是另一個程序，看不到）。
+### 團隊對話（TEAM CHAT）
+
+用 agent teams 時，lead 和 teammate 之間用 SendMessage 傳的訊息會像通訊軟體一樣顯示在 zoo 下方的「TEAM CHAT」：lead 在右、teammate 在左，每個人有自己的顏色和一隻依名字挑的動物頭像（lead 是 👑），氣泡上標「誰 → 誰」和時間；點名字看全文，`c` 隱藏／顯示，「清空」清掉紀錄。預設顯示最近 6 則（保留 60 則），「▴ 較早的 n 則」展開更早的；沒送出的訊息標 ✕。有名字的背景 agent（`Agent` 帶 `name`）互傳訊息也一樣會出現。
+
+只記得到在這個 Claude Code 程序裡跑的 agent（tmux 分割窗格的 teammate 是另一個程序，看不到）。
 
 指令：`/agent-zoo` 打開 panel，`/agent-zoo compact` 切換清單模式，`/agent-zoo chat` 隱藏／顯示團隊對話，`/agent-zoo big`／`small` 切換機器人大小，`/agent-zoo clear` 清掉已完成的。
 

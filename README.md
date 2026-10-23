@@ -6,7 +6,7 @@ Three Claude Code mods (hooks-module plugins), each a pane that stays open besid
 
 | Mod | In one line | Command |
 | --- | --- | --- |
-| **agent-zoo** | Every sub-agent and fork is a little 3D pixel robot; open one to see what it is doing right now | `/agent-zoo` |
+| **agent-zoo** | Every sub-agent and fork is a little 3D pixel robot; open one to see what it is doing right now; agent-team messages show below it like a messenger | `/agent-zoo` |
 | **todo-history** | The whole history of the todo list: undo one task alone, go back to any step, and the list follows a rewind | `/todos` |
 | **session-manager** | Every Claude Code session on this machine: search, resume, open a background session, and see your remaining usage | `/session-manager` |
 
@@ -21,6 +21,10 @@ Three Claude Code mods (hooks-module plugins), each a pane that stays open besid
 **agent-zoo**: a running agent hops, a finished one smiles. Press "▸ 看進度" (progress) to see what it said and which tools it used.
 
 <img src="docs/agent-zoo.png" alt="agent-zoo: two finished agents, each a pixel robot" width="480">
+
+**agent-zoo TEAM CHAT**: the lead's (👑) messages on the right, teammates' on the left, each with a colour and an animal of its own; press a name to read a long message whole.
+
+<img src="docs/agent-zoo-team-chat.png" alt="agent-zoo TEAM CHAT: bubbles of messages between lead, reviewer and scout" width="480">
 
 **todo-history**: the current-list page shows progress and lets you undo one item; the history page shows every step, lets you go back to any of them, and lists agents and forks too.
 
@@ -66,7 +70,11 @@ Every sub-agent is a shaded 3D robot (half-block pixels in the terminal; Windows
 
 Robots are 10×5 cells by default; `/agent-zoo big` brings back the original 18×9 ones (`/agent-zoo small` switches back; the choice is remembered).
 
-**Team chat**: with agent teams, the messages the lead and its teammates send each other with SendMessage show under the zoo as a messenger would draw them, in TEAM CHAT: the lead on the right, teammates on the left, each in a colour and an animal of its own picked by name (the lead wears 👑), every bubble headed with who wrote to whom and when; press a name for the whole message, `c` to hide or show it, Clear to empty it. Only agents running in this Claude Code process are seen (a teammate in a tmux split pane is another process).
+### Team chat
+
+With agent teams, the messages the lead and its teammates send each other with SendMessage show under the zoo as a messenger would draw them, in TEAM CHAT: the lead on the right, teammates on the left, each in a colour and an animal of its own picked by name (the lead wears 👑), every bubble headed with who wrote to whom and when; press a name for the whole message, `c` to hide or show it, Clear to empty it. The last 6 show by default (60 are kept); "▴ 較早的 n 則" opens the earlier ones, and a message that was not delivered is marked ✕. Named background agents (`Agent` with a `name`) messaging each other show up too.
+
+Only agents running in this Claude Code process are seen (a teammate in a tmux split pane is another process).
 
 Commands: `/agent-zoo` opens the pane, `/agent-zoo compact` toggles list mode, `/agent-zoo chat` hides or shows the team chat, `/agent-zoo big` / `small` sets the robot size, `/agent-zoo clear` drops finished agents.
 
