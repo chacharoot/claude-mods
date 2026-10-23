@@ -253,7 +253,10 @@ export const register: Register = on => {
       const saved = await $.fs.read(`${dir}/history.json`).catch(() => undefined)
       if (saved) {
         try {
-          await update($, history, () => ({ ...EMPTY, ...(JSON.parse(saved) as History) }))
+          const loaded = { ...EMPTY, ...(JSON.parse(saved) as History) }
+          // 0.1.0 saved changes without `after`: they came before any step, which is 0.
+          const changes = loaded.changes.map(change => ({ ...change, after: change.after ?? 0 }))
+          await update($, history, () => ({ ...loaded, changes }))
         } catch {
           // A torn file starts the history over.
         }

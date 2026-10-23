@@ -224,3 +224,38 @@ test('an edit another agent makes while a restore runs is still backed up', asyn
   expect(await ui.find({ type: 'Text', text: /1 個檔案備份/ })).toBeDefined()
   await ui.unmount()
 })
+
+test('changes saved by 0.1.0, without a step number, are not restored by a later rollback', async ($, on) => {
+  const files = new Map<string, string>([
+    ['C:/proj/old.ts', 'edited long ago'],
+    ['C:/Users/amy/.claude/todo-history/s4/blobs/1.txt', 'ancient'],
+    // As 0.1.0 wrote it: a change with no `after`.
+    ['C:/Users/amy/.claude/todo-history/s4/history.json', JSON.stringify({
+      snapshots: [], blobs: 1, pending: [],
+      changes: [{ at: 1, owner: '', file: 'C:/proj/old.ts', blob: 'blobs/1.txt' }],
+    })],
+  ])
+  on('command.register', () => ({ value: { command: 'todos' } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('session.id', () => ({ value: 's4' }))
+  on('agent.list', () => ({ value: [] }))
+  on('env.get', (_, e) => ({ value: e.name === 'USERPROFILE' ? 'C:/Users/amy' : undefined }))
+  on('fs.read', (_, e) => {
+    const text = files.get(key(e.path))
+    if (text === undefined) throw new Error('ENOENT')
+    return { value: text }
+  })
+  on('fs.write', (_, e) => (files.set(key(e.path), e.text), { value: undefined }))
+  on('fs.exists', (_, e) => ({ value: files.has(key(e.path)) }))
+  on('tool.call', () => ({ result: {} }))
+  mock.clock(on)
+
+  await $.session.start({ cwd: 'C:/proj', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: 'TodoWrite', todos: todos(['Later work', 'in_progress']) })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'step-btn-1' })
+  expect(await ui.find({ type: 'Text', text: /之後沒有用 Edit／Write 改過檔案/ })).toBeDefined()
+  expect(files.get('C:/proj/old.ts')).toBe('edited long ago')
+  await ui.unmount()
+})
