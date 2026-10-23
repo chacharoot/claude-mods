@@ -204,3 +204,37 @@ test('shows what is left of each rate-limit window, and follows session.measure'
   expect(await ui.find({ type: 'Text', text: /7 天/ })).toBeUndefined()
   await ui.unmount()
 })
+
+test('a background session (a /fork) opens attached in a new tab', async ($, on) => {
+  const calls: string[][] = []
+  on('command.register', () => ({ value: { command: 'sessions' } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('session.id', () => ({ value: 'me' }))
+  const clock = mock.clock(on)
+  mock.store(on)
+  on('process.run', (_, e) => {
+    const args = e.argv.slice(3)
+    calls.push(args)
+    const out = args[0] === 'index'
+      ? {
+          rows: [ROW('fk', 'Forked talk', 'D:\\test')],
+          live: { fk: { pid: 7, tty: '', status: 'idle', kind: 'bg', name: 'fork', app: 'Console' } },
+          platform: 'win',
+          apps: ['Windows Terminal'],
+        }
+      : { ok: true, msg: '' }
+    return { value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+
+  await $.session.start({ cwd: 'D:\\test', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'row-fk' })
+  expect(await ui.find({ type: 'Text', text: /背景/ })).toBeDefined()
+  await ui.press({ key: 'jump-fk' })
+  expect(calls.find(c => c[0] === 'open')).toEqual(['open', 'Windows Terminal', 'D:\\test', 'claude attach fk'])
+  expect(calls.some(c => c[0] === 'focus')).toBe(false)
+  expect(await ui.find({ type: 'Text', text: /已在 Windows Terminal 打開/ })).toBeDefined()
+  await ui.unmount()
+})

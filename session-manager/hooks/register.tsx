@@ -158,9 +158,18 @@ async function cycleApp($: EngineInterface) {
   await $.store.set('app', next)
 }
 
-// A live session is brought to front; any other is resumed in a new window.
+// A live session is brought to front; a background one (a /fork, a --bg run) has no
+// window, so it is attached in a new one; any other is resumed in a new window.
 async function jump($: EngineInterface, row: SessionRow) {
   const info = (await read($, live))[row.id]
+  if (info?.kind === 'bg') {
+    const app = await chosenApp($)
+    await setView($, { busy: `在 ${app} 打開背景 session…` })
+    const done = await python<Done>($, ['open', app, row.cwd, `claude attach ${row.id}`])
+    return say($, done.ok
+      ? `已在 ${app} 打開「${clip(row.title, 20)}」；在空白輸入框按 ← 離開，它會繼續在背景`
+      : `${app} 開啟失敗：${done.msg}`)
+  }
   if (info) {
     const app = info.app || (await chosenApp($))
     const done = await python<Done>($, ['focus', app, info.tty])
@@ -320,7 +329,7 @@ export const register: Register = on => {
           ) : (
             <Box flexDirection="row" gap={1} flexWrap="wrap">
               {!isMe && (
-                <Button key={`jump-${row.id}`} label={info ? '跳過去' : 'Resume'} hotkey="t" variant="primary"
+                <Button key={`jump-${row.id}`} label={info?.kind === 'bg' ? '打開' : info ? '跳過去' : 'Resume'} hotkey="t" variant="primary"
                   onPress={() => attempt($, info ? '切換' : 'Resume', () => jump($, row))} />
               )}
               <Button key={`rename-btn-${row.id}`} label="改名" hotkey="e"
