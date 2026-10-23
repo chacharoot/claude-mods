@@ -19,8 +19,11 @@ export type Snapshot = {
 
 // A file's content before the first edit to it after a snapshot: what restoring to
 // that snapshot writes back. `blob` names the saved copy; null when the file did not exist.
+// `after` is the n of the newest snapshot when it was saved (0 before any): order by
+// step, never by clock, so an edit in the same millisecond as a step still counts.
 export type Change = {
   at: number
+  after: number
   owner: Owner
   file: string
   blob: string | null

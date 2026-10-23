@@ -16,8 +16,16 @@ const FILE_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit', 'MultiEdit'])
 
 // Where this session's history and saved file copies live.
 let dir = ''
-// Set while a restore makes its own tool calls, so they are not recorded as new steps.
-let restoring = false
+
+// Tool calls run in parallel (a turn's batch, several agents): every read-modify-write
+// of the history and its file waits its turn here, so no two take the same blob name
+// or interleave their writes of history.json.
+let queue: Promise<unknown> = Promise.resolve()
+function serial<T>(work: () => Promise<T>): Promise<T> {
+  const run = queue.then(work, work)
+  queue = run.catch(() => undefined)
+  return run
+}
 
 const ICON: Record<Status, string> = { pending: '☐', in_progress: '▶', completed: '✓' }
 const TONE: Record<Status, string | undefined> = { pending: undefined, in_progress: 'claude', completed: 'success' }
@@ -47,7 +55,8 @@ function age(ms: number) {
 const base = (path: string) => path.split(/[\\/]/).pop() ?? path
 // Windows paths compare without case or slash direction.
 const same = (path: string) => path.replace(/\\/g, '/').toLowerCase()
-const isWindowsPath = (path: string) => /^[A-Za-z]:[\\/]/.test(path) || path.includes('\\')
+// A drive letter, a backslash, or a UNC share (`//server/share` too).
+const isWindowsPath = (path: string) => /^[A-Za-z]:[\\/]/.test(path) || path.includes('\\') || path.startsWith('//')
 
 const ownerOf = (agentId: string | undefined, tool: string): Owner => (tool.startsWith('Task') ? 'tasks' : agentId ?? '')
 const latest = (h: History, owner: Owner) => h.snapshots.filter(s => s.owner === owner).at(-1)
@@ -71,45 +80,51 @@ function diffNote(before: readonly Item[], after: readonly Item[]) {
 const sameItems = (a: readonly Item[], b: readonly Item[]) =>
   a.length === b.length && a.every((item, i) => item.key === b[i].key && item.status === b[i].status && item.content === b[i].content)
 
+// Callers hold the queue (serial): a save never interleaves with another.
 async function save($: EngineInterface) {
   if (!dir) return
   await $.fs.write(`${dir}/history.json`, JSON.stringify(await read($, history))).catch(() => undefined)
 }
 
-async function record($: EngineInterface, owner: Owner, items: Item[], restoredFrom?: number) {
+// Holds the queue; returns the snapshot written, or undefined when the list did not change.
+async function record($: EngineInterface, owner: Owner, items: Item[], note?: { restoredFrom?: number; text?: string }) {
   const h = await read($, history)
   const prev = latest(h, owner)
-  if (prev && restoredFrom === undefined && sameItems(prev.items, items)) return
+  if (prev && !note && sameItems(prev.items, items)) return undefined
   const snapshot: Snapshot = {
     n: (h.snapshots.at(-1)?.n ?? 0) + 1,
     at: await $.clock.now(),
     owner,
     items,
-    note: restoredFrom === undefined ? diffNote(prev?.items ?? [], items) : `↶ 回到 #${restoredFrom}`,
-    restoredFrom,
+    note: note?.text ?? (note?.restoredFrom !== undefined ? `↶ 回到 #${note.restoredFrom}` : diffNote(prev?.items ?? [], items)),
+    restoredFrom: note?.restoredFrom,
   }
   await update($, history, now => ({ ...now, snapshots: [...now.snapshots, snapshot].slice(-MAX_SNAPSHOTS) }))
   await save($)
+  return snapshot
 }
 
-// Saves a file's content before the first edit to it since the latest step.
-async function backup($: EngineInterface, owner: Owner, file: string) {
+// Holds the queue. Saves a file's content as it stands, unless it was already saved
+// since the latest step (`force` saves it regardless, for a restore's own checkpoint).
+async function backup($: EngineInterface, owner: Owner, file: string, force = false) {
   if (!dir || !file) return
   const h = await read($, history)
-  const since = h.snapshots.at(-1)?.at ?? 0
-  if (h.changes.some(change => change.at >= since && same(change.file) === same(file))) return
+  const after = h.snapshots.at(-1)?.n ?? 0
+  if (!force && h.changes.some(change => change.after === after && same(change.file) === same(file))) return
   const isThere = await $.fs.exists(file).catch(() => true)
   const content = isThere
     ? await $.fs.read(file).then(text => ({ text }), () => undefined)
     : { text: null }
   // Unreadable (over 4 MiB, not text): it cannot be restored, so nothing is kept.
   if (!content) return
+  const at = await $.clock.now()
   let blob: string | null = null
   if (content.text !== null) {
-    blob = `blobs/${h.blobs + 1}.txt`
+    // The time in the name keeps it unique even if the count ever starts over.
+    blob = `blobs/${h.blobs + 1}-${at}.txt`
     await $.fs.write(`${dir}/${blob}`, content.text)
   }
-  const change: Change = { at: await $.clock.now(), owner, file, blob }
+  const change: Change = { at, after, owner, file, blob }
   await update($, history, now => ({ ...now, changes: [...now.changes, change], blobs: blob ? now.blobs + 1 : now.blobs }))
   await save($)
 }
@@ -118,7 +133,7 @@ async function backup($: EngineInterface, owner: Owner, file: string) {
 function filesAfter(h: History, step: Snapshot) {
   const first = new Map<string, Change>()
   for (const change of h.changes) {
-    if (change.at <= step.at) continue
+    if (change.after < step.n) continue
     const key = same(change.file)
     if (!first.has(key)) first.set(key, change)
   }
@@ -126,6 +141,8 @@ function filesAfter(h: History, step: Snapshot) {
 }
 
 async function removeFile($: EngineInterface, file: string) {
+  // Already gone is what a restore wants; Remove-Item would fail on it where rm -f does not.
+  if (!(await $.fs.exists(file).catch(() => true))) return
   const ran = isWindowsPath(file)
     ? await $.process.run(['powershell', '-NoProfile', '-NonInteractive', '-Command', 'Remove-Item -LiteralPath $env:TH_PATH -Force'],
         { env: { TH_PATH: file } })
@@ -170,43 +187,50 @@ async function restore($: EngineInterface, n: number, withFiles: boolean) {
   if (!step) return
   const failed: string[] = []
   const restored: string[] = []
-  restoring = true
-  try {
-    if (withFiles) {
-      for (const change of filesAfter(h, step)) {
-        try {
-          if (change.blob === null) await removeFile($, change.file)
-          else await $.fs.write(change.file, await $.fs.read(`${dir}/${change.blob}`))
-          restored.push(change.file)
-        } catch (err) {
-          failed.push(`${base(change.file)}（${err instanceof Error ? err.message : String(err)}）`)
-        }
-      }
+  const targets = withFiles ? filesAfter(h, step) : []
+  // First a step holding things as they are now, with a copy of every file about to be
+  // overwritten, so the restore itself can be rolled back from the same pane.
+  const checkpoint = withFiles
+    ? await serial(async () => {
+        const made = await record($, step.owner, latest(await read($, history), step.owner)?.items ?? [], { text: `📌 回到 #${n} 之前的狀態` })
+        for (const change of targets) await backup($, change.owner, change.file, true)
+        return made
+      })
+    : undefined
+  for (const change of targets) {
+    try {
+      if (change.blob === null) await removeFile($, change.file)
+      else await $.fs.write(change.file, await $.fs.read(`${dir}/${change.blob}`))
+      restored.push(change.file)
+    } catch (err) {
+      failed.push(`${base(change.file)}（${err instanceof Error ? err.message : String(err)}）`)
     }
-    let items = step.items
-    let isApplied = false
-    if (step.owner === '') {
-      isApplied = await $.tool
-        .call({ tool: 'TodoWrite', todos: items.map(item => ({ content: item.content, status: item.status, activeForm: item.content })) })
-        .then(r => !('deny' in r), () => false)
-    } else if (step.owner === 'tasks') {
-      items = await restoreTasks($, latest(h, 'tasks')?.items ?? [], items).then(
-        out => ((isApplied = true), out),
-        () => items,
-      )
-    }
-    await record($, step.owner, items, n)
-    const list = step.owner === '' ? 'todo list' : step.owner === 'tasks' ? 'task list' : `todo list of agent ${step.owner}`
-    const files = restored.length
-      ? `\nThese files were also restored to their content at that step, undoing every edit made to them after it:\n${restored.map(f => `- ${f}`).join('\n')}`
-      : ''
-    const told = `The user rolled the ${list} back to step #${n} with the todo-history mod${isApplied ? '' : ' (the list could not be written back for you; adopt it yourself)'}. The list is now:\n${listText(items)}${files}\nTreat this as the current state.`
+  }
+  // These tool calls carry this plugin as their origin; the tool.call hook skips them.
+  let items = step.items
+  let isApplied = false
+  if (step.owner === '') {
+    isApplied = await $.tool
+      .call({ tool: 'TodoWrite', todos: items.map(item => ({ content: item.content, status: item.status, activeForm: item.content })) })
+      .then(r => !('deny' in r), () => false)
+  } else if (step.owner === 'tasks') {
+    items = await restoreTasks($, latest(await read($, history), 'tasks')?.items ?? [], items).then(
+      out => ((isApplied = true), out),
+      () => items,
+    )
+  }
+  const list = step.owner === '' ? 'todo list' : step.owner === 'tasks' ? 'task list' : `todo list of agent ${step.owner}`
+  const files = restored.length
+    ? `\nThese files were also restored to their content at that step, undoing every edit made to them after it:\n${restored.map(f => `- ${f}`).join('\n')}`
+    : ''
+  const told = `The user rolled the ${list} back to step #${n} with the todo-history mod${isApplied ? '' : ' (the list could not be written back for you; adopt it yourself)'}. The list is now:\n${listText(items)}${files}\nTreat this as the current state.`
+  await serial(async () => {
+    await record($, step.owner, items, { restoredFrom: n })
     await update($, history, now => ({ ...now, pending: [...now.pending, told] }))
     await save($)
-  } finally {
-    restoring = false
-  }
-  const done = `已回到 #${n}${withFiles ? `，還原 ${restored.length} 個檔案` : ''}`
+  })
+  const undo = checkpoint ? `（要反悔就回到 #${checkpoint.n}）` : ''
+  const done = `已回到 #${n}${withFiles ? `，還原 ${restored.length} 個檔案${undo}` : ''}`
   await update($, view, v => ({
     ...v,
     confirm: null,
@@ -242,9 +266,11 @@ export const register: Register = on => {
 
   on('command.run', { command: 'todos' }, async ($, e) => {
     if (e.args.trim() === 'clear') {
-      await update($, history, () => EMPTY)
+      await serial(async () => {
+        await update($, history, () => EMPTY)
+        await save($)
+      })
       await update($, view, v => ({ ...v, open: null, confirm: null, note: null }))
-      await save($)
       return { text: 'Todo History: this session\'s history cleared.' }
     }
     await $.ui.open({ id: PANE, title: TITLE, focus: true })
@@ -253,31 +279,38 @@ export const register: Register = on => {
   })
 
   on('tool.call', async ($, e, next) => {
-    if (FILE_TOOLS.has(e.tool) && !restoring) {
+    // A restore's own TodoWrite and task calls: it records the result itself.
+    if (next.origin.plugin === 'todo-history') return next(e)
+    if (FILE_TOOLS.has(e.tool)) {
       const input = e as { file_path?: unknown; notebook_path?: unknown }
-      await backup($, ownerOf(e.agentId, e.tool), String(input.file_path ?? input.notebook_path ?? ''))
+      await serial(() => backup($, ownerOf(e.agentId, e.tool), String(input.file_path ?? input.notebook_path ?? '')))
     }
     const result = await next(e)
-    if (restoring || 'deny' in result || result.isError) return result
+    if ('deny' in result || result.isError) return result
 
     if (e.tool === 'TodoWrite') {
       const items = e.todos.map((todo): Item => ({ key: todo.content, content: todo.content, status: todo.status }))
-      await record($, ownerOf(e.agentId, e.tool), items)
+      await serial(() => record($, ownerOf(e.agentId, e.tool), items))
     } else if (e.tool === 'TaskCreate') {
       const made = result.result as { task?: { id: string; subject: string } } | undefined
       if (made?.task) {
-        const items = latest(await read($, history), 'tasks')?.items ?? []
-        await record($, 'tasks', [...items, { key: made.task.id, content: made.task.subject, status: 'pending' }])
+        const task = made.task
+        await serial(async () => {
+          const items = latest(await read($, history), 'tasks')?.items ?? []
+          await record($, 'tasks', [...items, { key: task.id, content: task.subject, status: 'pending' }])
+        })
       }
     } else if (e.tool === 'TaskUpdate') {
-      const items = latest(await read($, history), 'tasks')?.items ?? []
-      const updated = e.status === 'deleted'
-        ? items.filter(item => item.key !== e.taskId)
-        : items.map(item =>
-            item.key === e.taskId
-              ? { ...item, content: e.subject ?? item.content, status: (e.status as Status | undefined) ?? item.status }
-              : item)
-      await record($, 'tasks', updated)
+      await serial(async () => {
+        const items = latest(await read($, history), 'tasks')?.items ?? []
+        const updated = e.status === 'deleted'
+          ? items.filter(item => item.key !== e.taskId)
+          : items.map(item =>
+              item.key === e.taskId
+                ? { ...item, content: e.subject ?? item.content, status: (e.status as Status | undefined) ?? item.status }
+                : item)
+        await record($, 'tasks', updated)
+      })
     }
 
     return result
@@ -285,10 +318,15 @@ export const register: Register = on => {
 
   // After a restore, the next prompt carries what changed, so the model works from it.
   on('prompt.submit', async ($, e, next) => {
-    const { pending } = await read($, history)
+    const pending = await serial(async () => {
+      const taken = (await read($, history)).pending
+      if (taken.length) {
+        await update($, history, h => ({ ...h, pending: [] }))
+        await save($)
+      }
+      return taken
+    })
     if (!pending.length) return next(e)
-    await update($, history, h => ({ ...h, pending: [] }))
-    await save($)
 
     return next({ ...e, context: [...(e.context ?? []), ...pending] })
   })

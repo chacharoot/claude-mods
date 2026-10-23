@@ -44,7 +44,7 @@ Claude 的 todo（`TodoWrite`）和 task（`TaskCreate`／`TaskUpdate`）每變�
 - **只還原清單**：清單回到那一步。
 - **清單＋檔案一起還原**：清單回到那一步，之後用 Edit／Write 改過的檔案也還原成那時的內容（那之後才新增的檔案會刪掉）。要撤銷一個 task，就回到它「▶ 開始」那一步。
 
-還原前會先列出要動的檔案讓你確認；還原後，你下一則訊息會自動告訴 Claude 現在的清單和哪些檔案被還原。用 Bash／PowerShell 改的檔案不會被記錄。歷程和檔案備份存在 `~/.claude/todo-history/<session id>/`。
+還原前會先列出要動的檔案讓你確認，並先記一步「📌 回到 #n 之前的狀態」（連同要被覆寫的檔案），按錯了就回到那一步撤銷。還原後，你下一則訊息會自動告訴 Claude 現在的清單和哪些檔案被還原。用 Bash／PowerShell 改的檔案不會被記錄。歷程和檔案備份存在 `~/.claude/todo-history/<session id>/`。
 
 指令：`/todos` 打開 panel，`/todos clear` 清掉這個 session 的歷程。
 
