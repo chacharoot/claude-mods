@@ -8,7 +8,7 @@ Claude Code 的三個 mod（hooks-module plugin），都會在對話旁邊開一
 | --- | --- | --- |
 | **agent-zoo** | 每個 sub-agent／fork 都是一隻 3D 像素小機器人，點開看它即時在做什麼 | `/agent-zoo` |
 | **todo-history** | todo 清單的完整歷程：單獨撤銷一個 task、整段回到某一步，rewind 時清單自動跟著回去 | `/todos` |
-| **session-manager** | 這台電腦所有 Claude Code session 的列表：搜尋、resume、打開背景 session，順便顯示剩餘額度 | `/sessions` |
+| **session-manager** | 這台電腦所有 Claude Code session 的列表：搜尋、resume、打開背景 session，順便顯示剩餘額度 | `/session-manager` |
 
 ```
 /plugin install agent-zoo --marketplace chacharoot/claude-mods
@@ -42,7 +42,7 @@ Claude Code 的三個 mod（hooks-module plugin），都會在對話旁邊開一
   - **改名**（寫入跟 `/rename` 一樣的記錄）、**複製指令**、**刪除**（移到垃圾桶，可救回）
 - **+ 新增**：選資料夾開新 session
 - 標題區下方顯示剩餘額度（5 小時、7 天）和多久後重置
-- 指令：`/sessions`
+- 指令：`/session-manager`；`/sessions` 沒被其他 mod（例如 session-monitor）佔用時也能用
 
 需求：Python 3（用來讀超過 4MB 的 transcript；依序試 `python3`、`python`、`py -3`）。Windows 沒有 Python 時改用內建的 PowerShell 跑同樣的功能，不用另外安裝。
 

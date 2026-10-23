@@ -5,7 +5,7 @@ const PANE = {
   component: 'Pane',
   requestId: 'session-manager',
   props: {
-    title: 'Sessions',
+    title: 'Session Manager',
     isFocused: true,
     bodyColumns: 60,
     placement: 'dock',
@@ -237,4 +237,36 @@ test('a background session (a /fork) opens attached in a new tab', async ($, on)
   expect(calls.some(c => c[0] === 'focus')).toBe(false)
   expect(await ui.find({ type: 'Text', text: /已在 Windows Terminal 打開/ })).toBeDefined()
   await ui.unmount()
+})
+
+test('another plugin holding /sessions neither stops the pane nor loses its own command', async ($, on) => {
+  const registered: string[] = []
+  on('command.register', (_, e) => {
+    if (e.name === 'sessions') throw new Error('"/sessions" refused: the plugin session-monitor registered it already')
+    registered.push(e.name)
+    return { value: { command: e.name } }
+  })
+  const opened: string[] = []
+  on('ui.open', (_, e) => (opened.push(e.id), { value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('session.id', () => ({ value: 'me' }))
+  // What sits beneath: session-monitor's own answer to /sessions.
+  on('command.run', () => ({ text: 'session-monitor: panel opened' }))
+  const clock = mock.clock(on)
+  mock.store(on)
+  on('process.run', () => ({
+    value: { exitCode: 0, stdout: JSON.stringify({ rows: [], live: {}, platform: 'mac', apps: ['Terminal'] }), stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
+  }))
+
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  expect(registered).toEqual(['session-manager'])
+  expect(opened).toContain('session-manager')
+
+  // A typed-in command: the engine stamps origin and presentation on its own.
+  const typed = (command: string) => ({ command, args: '' }) as Parameters<typeof $.command.run>[0]
+  expect((await $.command.run(typed('session-manager'))).text).toBe('Session Manager opened.')
+  expect((await $.command.run(typed('sessions'))).text).toBe('session-monitor: panel opened')
+  // Let the refresh the open started finish inside the test.
+  await clock.settle()
 })

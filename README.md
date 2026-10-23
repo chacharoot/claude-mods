@@ -8,7 +8,7 @@ Three Claude Code mods (hooks-module plugins), each a pane that stays open besid
 | --- | --- | --- |
 | **agent-zoo** | Every sub-agent and fork is a little 3D pixel robot; open one to see what it is doing right now | `/agent-zoo` |
 | **todo-history** | The whole history of the todo list: undo one task alone, go back to any step, and the list follows a rewind | `/todos` |
-| **session-manager** | Every Claude Code session on this machine: search, resume, open a background session, and see your remaining usage | `/sessions` |
+| **session-manager** | Every Claude Code session on this machine: search, resume, open a background session, and see your remaining usage | `/session-manager` |
 
 ```
 /plugin install agent-zoo --marketplace chacharoot/claude-mods
@@ -44,7 +44,7 @@ Lists every Claude Code session on this machine, grouped by folder, clickable.
   - **Rename** (writes the same record as `/rename`), **Copy command**, **Delete** (to the trash, recoverable)
 - **+ New**: start a session in a folder you pick
 - Under the header: the usage left in the 5-hour and 7-day windows, and when each resets
-- Command: `/sessions`
+- Command: `/session-manager`; `/sessions` also works when no other mod (session-monitor, for one) holds it
 
 Needs Python 3 (to read transcripts over 4 MB; it tries `python3`, `python`, `py -3` in turn). On Windows without Python it runs the same features in the built-in PowerShell, with nothing to install.
 

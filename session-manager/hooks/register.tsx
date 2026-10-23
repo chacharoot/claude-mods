@@ -5,7 +5,7 @@ import type { ContentHit, Host, Limit, LiveInfo, Mode, SessionRow, View } from '
 import { SCANNER } from './scanner'
 
 const PANE = 'session-manager'
-const TITLE = 'Sessions'
+const TITLE = 'Session Manager'
 const PROJECTS = '~/.claude/projects'
 const CACHE = '~/.claude/session-manager/index.json'
 const LIMIT = 80
@@ -226,13 +226,24 @@ const matches = (row: SessionRow, q: string) =>
     .toLowerCase()
     .includes(q)
 
+async function openPane($: EngineInterface) {
+  await $.ui.open({ id: PANE, title: TITLE, focus: true })
+  void refresh($)
+
+  return { text: 'Session Manager opened.' }
+}
+
 export const register: Register = on => {
+  // Whether `/sessions` is ours this load; another plugin's stays its own.
+  let ownsSessions = false
+
   on('session.start', async ($, e, next) => {
     const done = await next(e)
-    await $.command.register({
-      name: 'sessions',
-      description: 'Browse, search, resume, rename, start and delete Claude Code sessions on this machine',
-    })
+    // `/sessions` is a common name (session-monitor takes it too): claim it only
+    // when free, so a clash never stops the pane from opening.
+    const description = 'Browse, search, resume, rename, start and delete Claude Code sessions on this machine'
+    await $.command.register({ name: 'session-manager', description }).catch(() => undefined)
+    ownsSessions = await $.command.register({ name: 'sessions', description }).then(() => true, () => false)
     const stored = await $.store.get('app').catch(() => undefined)
     await update($, appPref, () => (typeof stored === 'string' ? stored : ''))
     void $.session.id().then(id => update($, current, () => id))
@@ -252,12 +263,8 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('command.run', { command: 'sessions' }, async $ => {
-    await $.ui.open({ id: PANE, title: TITLE, focus: true })
-    void refresh($)
-
-    return { text: 'Sessions pane opened.' }
-  })
+  on('command.run', { command: 'session-manager' }, openPane)
+  on('command.run', { command: 'sessions' }, ($, e, next) => (ownsSessions ? openPane($) : next(e)))
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const els = $.ui.resolve(e)

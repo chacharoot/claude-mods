@@ -1,5 +1,12 @@
 # Changelog
 
+## session-manager 0.2.5
+- **修正**：和 session-monitor 這類也用 `/sessions` 的 mod 一起裝時，指令撞名會讓 session-manager 整個啟動失敗、panel 不出現。現在一律註冊 `/session-manager`，`/sessions` 只在沒被佔用時才註冊，也不會攔截別人的 `/sessions`。
+- panel 分頁標題改成「Session Manager」，跟其他 session 類 mod 分得開。
+
+## todo-history（測試）
+- 測試用的 Windows 路徑在 macOS 上會被當成相對路徑，6 個測試失敗；改成兩邊都能跑。程式本身沒有改。
+
 ## session-manager 0.2.4
 - **修正**：「打開」背景 session 時用了完整的 session id，`claude attach` 只認 8 碼的短 id（`claude agents` 列出的那個），所以會顯示 `No job matching`。現在改用 session 檔裡記的短 id。
 

@@ -18,7 +18,9 @@ const todos = (...list: [string, 'pending' | 'in_progress' | 'completed'][]) =>
   list.map(([content, status]) => ({ content, status, activeForm: content }))
 
 // The engine hands a path to fs hooks in the platform's spelling: keep files keyed one way.
-const key = (path: string) => path.replace(/\\/g, '/')
+// The tests spell paths the Windows way; off Windows the engine takes `C:/...` for a
+// relative path and puts the plugin's folder in front, which is dropped here.
+const key = (path: string) => path.replace(/\\/g, '/').replace(/^.+?(?=[A-Za-z]:\/)/, '')
 
 test('records each step, and rolls the list and the files edited since back to one', async ($, on) => {
   const files = new Map<string, string>([['C:/proj/a.ts', 'old a']])
