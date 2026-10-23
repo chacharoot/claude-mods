@@ -98,8 +98,6 @@ panel 分成兩頁：**目前清單**（`1`）和**歷程**（`2`）。還有工
 
 ## 安裝
 
-這是 private repo：你要先被邀請進這個 repo，而且電腦上的 git 要能讀 github.com（SSH key，或 `gh auth login` 後再 `gh auth setup-git`），安裝時不會詢問帳密。
-
 在 Claude Code 的輸入框：
 
 ```

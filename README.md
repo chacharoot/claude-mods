@@ -100,8 +100,6 @@ Commands: `/todos` opens the pane, `/todos clear` forgets this session's history
 
 ## Install
 
-This is a private repo: you need an invitation to it, and git on your machine must be able to read github.com (an SSH key, or `gh auth login` then `gh auth setup-git`); installing asks for no password.
-
 In Claude Code's prompt:
 
 ```
