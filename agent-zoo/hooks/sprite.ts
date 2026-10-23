@@ -1,12 +1,14 @@
 // A shaded little robot drawn per pixel, two pixels to a terminal cell: the
 // upper half block takes the top pixel as its foreground and the bottom one
-// as its background, so a SPRITE_COLS x SPRITE_ROWS Raster holds 18 x 18 px.
+// as its background, so a robot `size` px across is a size x size/2 Raster.
+// Drawn at 18 px (big) or 10 px (small, the default): the body scales, the
+// face has a pattern of its own per size.
 import type { AgentCard } from '../types'
 
-export const SPRITE_COLS = 18
-export const SPRITE_ROWS = 9
-const W = SPRITE_COLS
-const H = SPRITE_ROWS * 2
+export const SIZES = { small: 10, big: 18 } as const
+export type Size = keyof typeof SIZES
+export const spriteCols = (size: Size) => SIZES[size]
+export const spriteRows = (size: Size) => SIZES[size] / 2
 const DEFAULT = 0x01000000
 const UPPER = 0x2580
 const LOWER = 0x2584
@@ -50,7 +52,36 @@ const L = (() => {
   return v.map(c => c / n) as [number, number, number]
 })()
 
-export function critter(type: string, status: Status, frame: number): string {
+// Eyes on a grid of their own per size: w white, k ink.
+const EYES: Record<Size, Record<Status, string[]>> = {
+  big: {
+    running: ['.ww', '.wk', '...'],
+    waiting: ['...', 'kkk', '...'],
+    done: ['.k.', 'k.k', '...'],
+    failed: ['k.k', '.k.', 'k.k'],
+    killed: ['...', 'kkk', '...'],
+  },
+  small: {
+    running: ['w', 'k'],
+    waiting: ['.', 'k'],
+    done: ['k', '.'],
+    failed: ['k', 'k'],
+    killed: ['.', 'k'],
+  },
+}
+
+// Where the parts sit at each size: body centre and radius, ground row and shadow half-width,
+// feet (spread, and their drop below the body when down and when lifted), eyes and mouth.
+type Geom = { cx: number; cy: number; r: number; ground: number; shadow: number; feet: number; down: number; up: number; eyes: number[]; eyeDy: number; mouthDy: number }
+const GEOM: Record<Size, Geom> = {
+  big: { cx: 8.5, cy: 8.5, r: 6.3, ground: 17, shadow: 5, feet: 2.5, down: 0.4, up: -0.6, eyes: [-3.5, 1.5], eyeDy: -1, mouthDy: 4 },
+  small: { cx: 4.5, cy: 5, r: 3.1, ground: 9, shadow: 3, feet: 1.5, down: -0.1, up: -1.1, eyes: [-1.5, 1.5], eyeDy: -1, mouthDy: 2 },
+}
+
+export function critter(type: string, status: Status, frame: number, size: Size = 'small'): string {
+  const W = SIZES[size]
+  const H = W
+  const g = GEOM[size]
   const px: (Rgb | null)[] = new Array(W * H).fill(null)
   const set = (x: number, y: number, c: Rgb) => {
     const xi = Math.round(x)
@@ -65,18 +96,18 @@ export function critter(type: string, status: Status, frame: number): string {
 
   const bob =
     status === 'running' ? [0, -1, 0, 0][frame % 4]! : status === 'waiting' ? [0, 0, 1, 1][frame % 4]! * 0.5 : status === 'done' ? -0.5 : 1
-  const cx = 8.5
-  const cy = 8.5 + bob
-  const r = 6.3
+  const cx = g.cx
+  const cy = g.cy + bob
+  const r = g.r
 
   // Ground shadow, narrower while the body is up.
-  const sw = bob < 0 ? 4 : 5
-  for (let x = cx - sw; x <= cx + sw; x++) set(x, 17, SHADOW)
+  const sw = bob < 0 ? g.shadow - 1 : g.shadow
+  for (let x = cx - sw; x <= cx + sw; x++) set(x, g.ground, SHADOW)
 
   // Feet, stepping while running.
   const lift = status === 'running' ? frame % 2 : -1
-  for (const [i, fx] of [cx - 2.5, cx + 2.5].entries()) {
-    const fy = cy + r + (lift === i ? -0.6 : 0.4)
+  for (const [i, fx] of [cx - g.feet, cx + g.feet].entries()) {
+    const fy = cy + r + (lift === i ? g.up : g.down)
     set(fx - 0.5, fy, scale(base, 0.45))
     set(fx + 0.5, fy, scale(base, 0.45))
   }
@@ -100,34 +131,33 @@ export function critter(type: string, status: Status, frame: number): string {
   const top = cy - r - 0.5
   set(cx, top, scale(base, 0.55))
   const [on, off] = GLOW[status]
-  set(cx, top - 1, status === 'running' && frame % 2 ? off : on)
+  // Kept on the canvas when a hop lifts the body to its top row.
+  set(cx, Math.max(0, top - 1), status === 'running' && frame % 2 ? off : on)
 
-  // Face: eyes by status on a 3x3 grid each, looking around while running.
-  const ey = Math.round(cy - 1)
+  // Face: eyes by status, looking around while running.
+  const ey = Math.round(cy + g.eyeDy)
   const look = status === 'running' ? [0, 1, 0, -1][Math.floor(frame / 2) % 4]! : 0
-  const EYES: Record<Status, string[]> = {
-    running: ['.ww', '.wk', '...'],
-    waiting: ['...', 'kkk', '...'],
-    done: ['.k.', 'k.k', '...'],
-    failed: ['k.k', '.k.', 'k.k'],
-    killed: ['...', 'kkk', '...'],
-  }
-  for (const ex of [Math.round(cx - 3.5), Math.round(cx + 1.5)]) {
-    EYES[status].forEach((line, dy) =>
+  // The big pupil sits right of centre in its grid; the small one is the grid.
+  const pupil = size === 'big' ? look - 1 : look
+  for (const ex of g.eyes.map(dx => Math.round(cx + dx))) {
+    EYES[size][status].forEach((line, dy) =>
       [...line].forEach((ch, dx) => {
-        const x = ex + dx + (ch === 'k' && status === 'running' ? look - 1 : 0)
+        const x = ex + dx + (ch === 'k' && status === 'running' ? pupil : 0)
         if (ch === 'w') set(x, ey + dy, WHITE)
         if (ch === 'k') set(x, ey + dy, INK)
       }),
     )
   }
   // A mouth: a grin when done, a flat line when failed.
-  const my = ey + 4
-  if (status === 'done') ['k...k', '.kkk.'].forEach((line, dy) => [...line].forEach((ch, dx) => ch === 'k' && set(cx - 2 + dx, my + dy - 1, INK)))
-  if (status === 'failed') for (let dx = -1; dx <= 1; dx++) set(cx + dx, my, INK)
+  const my = ey + g.mouthDy
+  const grin = size === 'big' ? ['k...k', '.kkk.'] : ['.kk.']
+  if (status === 'done') grin.forEach((line, dy) => [...line].forEach((ch, dx) => ch === 'k' && set(cx - (line.length - 1) / 2 + dx, my + dy - grin.length + 1, INK)))
+  if (status === 'failed') for (let dx = size === 'big' ? -1 : -0.5; dx <= (size === 'big' ? 1 : 0.5); dx++) set(cx + dx, my, INK)
 
-  const words = new Uint32Array(SPRITE_COLS * SPRITE_ROWS * 3)
-  for (let row = 0; row < SPRITE_ROWS; row++) {
+  const cols = spriteCols(size)
+  const rows = spriteRows(size)
+  const words = new Uint32Array(cols * rows * 3)
+  for (let row = 0; row < rows; row++) {
     for (let x = 0; x < W; x++) {
       const hi = px[row * 2 * W + x] ?? null
       const lo = px[(row * 2 + 1) * W + x] ?? null

@@ -1,1 +1,1 @@
-{ "name": "agent-zoo", "version": "0.3.0", "description": "A pane beside the chat that shows each sub-agent and teammate as a shaded 3D pixel robot or a compact tree, with a live view of what each one is doing", "types": "./types/index.d.ts" }
+{ "name": "agent-zoo", "version": "0.3.1", "description": "A pane beside the chat that shows each sub-agent and teammate as a shaded 3D pixel robot or a compact tree, with a live view of what each one is doing", "types": "./types/index.d.ts" }

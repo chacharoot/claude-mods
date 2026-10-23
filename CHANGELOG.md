@@ -1,5 +1,9 @@
 # Changelog
 
+## agent-zoo 0.3.1
+- 小機器人縮小：預設 10×5 格（原本 18×9），眼睛和嘴巴有小尺寸專用的畫法；旁邊的文字精簡成 5 行，一個畫面放得下更多 agent。
+- `/agent-zoo big` 換回原本的大隻，`/agent-zoo small` 換回小的，選擇會記住。
+
 ## agent-zoo 0.3.0、todo-history 0.1.0
 
 ### agent-zoo

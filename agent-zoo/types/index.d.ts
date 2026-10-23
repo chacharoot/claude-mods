@@ -37,6 +37,8 @@ export type Detail = {
 export type ZooView = {
   // Compact draws one line per agent, nested under its parent, so a team fits.
   compact: boolean
+  // The robots' size: small (10 px, the default) or big (18 px).
+  size: 'small' | 'big'
 }
 
 declare module 'claude-code' {

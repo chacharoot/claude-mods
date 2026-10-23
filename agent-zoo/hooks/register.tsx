@@ -2,14 +2,14 @@ import { atom, read, update } from 'claude-code'
 import type { AgentInfo, EngineInterface, Register, SessionMessage, Timer } from 'claude-code'
 
 import type { AgentCard, Detail, Entry, ZooView } from '../types'
-import { bodyColor, critter, hex, SPRITE_COLS, SPRITE_ROWS } from './sprite'
+import { bodyColor, critter, hex, spriteCols, spriteRows } from './sprite'
 
 const PANE = 'agent-zoo'
 const TITLE = 'Agent Zoo'
 const agents = atom({ plugin: 'agent-zoo', key: 'agents' } as const, [])
 const tick = atom({ plugin: 'agent-zoo', key: 'tick' } as const, 0)
 const detail = atom({ plugin: 'agent-zoo', key: 'detail' } as const, null as Detail | null)
-const view = atom({ plugin: 'agent-zoo', key: 'view' } as const, { compact: false } as ZooView)
+const view = atom({ plugin: 'agent-zoo', key: 'view' } as const, { compact: false, size: 'small' } as ZooView)
 
 const STALE_MS = 60_000
 const DEPTH = 12
@@ -177,8 +177,10 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'agent-zoo',
-      description: 'Show the sub-agents and teammates of this session in a pane (compact: one line each; clear: drop finished ones)',
+      description: 'Show the sub-agents and teammates of this session in a pane (compact: one line each; big / small: robot size; clear: drop finished ones)',
     })
+    const stored = await $.store.get('size').catch(() => undefined)
+    if (stored === 'big' || stored === 'small') await update($, view, v => ({ ...v, size: stored }))
     void $.ui.open({ id: PANE, title: TITLE })
     void $.agent.list().then(async live => {
       await adopt($, live, await $.clock.now())
@@ -194,6 +196,11 @@ export const register: Register = on => {
       const kept = await update($, agents, list => list.filter(isLive))
       await update($, detail, now => (now && kept.some(card => card.id === now.id) ? now : null))
       return { text: 'Agent Zoo: finished agents cleared.' }
+    }
+    if (arg === 'big' || arg === 'small') {
+      await update($, view, v => ({ ...v, size: arg, compact: false }))
+      await $.store.set('size', arg)
+      return { text: `Agent Zoo: ${arg} robots.` }
     }
     if (arg === 'compact') {
       const { compact } = await update($, view, v => ({ ...v, compact: !v.compact }))
@@ -279,11 +286,15 @@ export const register: Register = on => {
     const list = await read($, agents)
     const frame = await read($, tick)
     const open = await read($, detail)
-    const { compact } = await read($, view)
+    const v = await read($, view)
+    const compact = v.compact
+    // A view kept from before sizes existed has none.
+    const size = v.size ?? 'small'
     const now = await $.clock.now()
     const W = Math.max(30, (e.props.bodyColumns ?? e.viewport?.columns ?? 48) - 1)
     const rows = e.viewport?.rows ?? 30
-    const info = W - SPRITE_COLS - 2
+    const cols = spriteCols(size)
+    const info = W - cols - 2
     const rule = <Text color="subtle">{'─'.repeat(W)}</Text>
     const count = (status: AgentCard['status']) => list.filter(card => card.status === status).length
     const summary = [
@@ -295,9 +306,9 @@ export const register: Register = on => {
 
     const bot = (key: string, type: string, status: AgentCard['status'], step: number) =>
       Raster ? (
-        <Raster key={key} columns={SPRITE_COLS} rows={SPRITE_ROWS} cells={critter(type, status, step)} />
+        <Raster key={key} columns={cols} rows={spriteRows(size)} cells={critter(type, status, step, size)} />
       ) : (
-        <Box width={SPRITE_COLS} />
+        <Box width={cols} />
       )
 
     const header = (
@@ -434,8 +445,10 @@ export const register: Register = on => {
       )
     }
 
-    // As many critters as fit, the open one always among them.
-    const room = Math.max(1, Math.floor((rows - 3 - detailRows) / (SPRITE_ROWS + 1)))
+    // As many critters as fit, the open one always among them. A small card is
+    // five lines beside a five-row robot; a big one keeps its spacer and rule.
+    const isSmall = size === 'small'
+    const room = Math.max(1, Math.floor((rows - 3 - detailRows) / (isSmall ? 6 : 10)))
     const picked = sorted.slice(0, room)
     const selected = open && sorted.find(card => card.id === open.id)
     const shown = selected && !picked.includes(selected) ? [...picked.slice(0, room - 1), selected] : picked
@@ -454,7 +467,7 @@ export const register: Register = on => {
               <Box flexDirection="row" gap={2}>
                 {bot(`bot-${card.id}`, card.type, card.status, frame + phase(card.id))}
                 <Box flexDirection="column" width={info}>
-                  <Text> </Text>
+                  {!isSmall && <Text> </Text>}
                   <Text>
                     <Text bold color={color}>{pad(clip(label(card), info - cells(chip) - 1), info - cells(chip))}</Text>
                     <Text color={COLOR[card.status]}>{chip}</Text>
@@ -462,9 +475,10 @@ export const register: Register = on => {
                   <Text dimColor>
                     {clip(`${elapsed((card.endedAt ?? now) - card.startedAt)} · ${card.toolCount} tools${card.model ? ` · ${card.model}` : ''}`, info)}
                   </Text>
-                  <Text color="subtle">{'┄'.repeat(Math.min(info, 24))}</Text>
+                  {!isSmall && <Text color="subtle">{'┄'.repeat(Math.min(info, 24))}</Text>}
                   <Text bold>{clip(card.description || '(no description)', info)}</Text>
-                  <Text dimColor>{clip(`› ${card.activity ?? '…'}`, info)}</Text>
+                  {/* Small cards show the stall warning in place of the activity line. */}
+                  {(!isSmall || !isStale) && <Text dimColor>{clip(`› ${card.activity ?? '…'}`, info)}</Text>}
                   {isStale && <Text color="warning">{clip(`⚠ ${elapsed(quiet)} 沒有動作，可能卡住了`, info)}</Text>}
                   <Button key={`open-${card.id}`} plain label={isOpen ? '▾ 收合進度' : '▸ 看進度'}
                     onPress={() => void select($, card.id)} />

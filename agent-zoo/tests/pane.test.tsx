@@ -120,3 +120,27 @@ test('the compact list nests agents under their parent, and a teammate idles ins
   expect(await ui.find({ type: 'Text', text: /1 waiting/ })).toBeDefined()
   await ui.unmount()
 })
+
+test('robots are small by default, and /agent-zoo big draws them big', async ($, on) => {
+  const rasters: { columns: number; rows: number }[] = []
+  on('command.register', () => ({ value: { command: 'agent-zoo' } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('agent.spawn', () => ({ model: 'haiku', agentId: 'a1' }))
+  on('agent.list', () => ({ value: [] }))
+  mock.clock(on)
+  mock.store(on)
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.agent.spawn(SPAWN)
+  const size = async () => {
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    const raster = await ui.find({ type: 'Raster' })
+    await ui.unmount()
+    return raster && { columns: raster.props.columns, rows: raster.props.rows }
+  }
+  rasters.push((await size())!)
+  await $.command.run({ command: 'agent-zoo', args: 'big' })
+  rasters.push((await size())!)
+  expect(rasters).toEqual([{ columns: 10, rows: 5 }, { columns: 18, rows: 9 }])
+})
