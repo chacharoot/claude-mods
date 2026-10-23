@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { AgentInfo, EngineInterface, Register, SessionMessage, Timer } from 'claude-code'
 
-import type { AgentCard, Detail, Entry, ZooView } from '../types'
+import type { AgentCard, ChatMessage, Detail, Entry, ZooView } from '../types'
 import { bodyColor, critter, hex, spriteCols, spriteRows } from './sprite'
 
 const PANE = 'agent-zoo'
@@ -10,6 +10,15 @@ const agents = atom({ plugin: 'agent-zoo', key: 'agents' } as const, [])
 const tick = atom({ plugin: 'agent-zoo', key: 'tick' } as const, 0)
 const detail = atom({ plugin: 'agent-zoo', key: 'detail' } as const, null as Detail | null)
 const view = atom({ plugin: 'agent-zoo', key: 'view' } as const, { compact: false, size: 'small' } as ZooView)
+const chat = atom({ plugin: 'agent-zoo', key: 'chat' } as const, [] as ChatMessage[])
+const CHAT_KEPT = 60
+const CHAT_SHOWN = 6
+// A sender keeps its colour across the chat; the lead takes the theme's own.
+const VOICES = ['#4cc9f0', '#f72585', '#ffd166', '#06d6a0', '#b388ff', '#ff9e64']
+// And an animal of its own, picked by its name; the lead wears the crown. All
+// outside the BMP, so every terminal draws them two cells wide.
+const FACES = ['🦊', '🐼', '🐨', '🐯', '🦁', '🐸', '🐙', '🦉', '🐧', '🐢', '🦄', '🐝', '🐳', '🦖', '🐹', '🐰']
+const LEAD_FACE = '👑'
 
 const STALE_MS = 60_000
 const DEPTH = 12
@@ -30,7 +39,7 @@ const phase = (id: string) => [...id].reduce((n, ch) => n + ch.charCodeAt(0), 0)
 let timer: Timer | undefined
 
 // Terminal cells a string takes: CJK and emoji are two wide.
-const WIDE = /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]|[\ud800-\udbff]/
+const WIDE = /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]|[\u2600-\u27bf\u2b00-\u2bff]|[\ud800-\udbff]/
 const cells = (s: string) => [...s].reduce((n, ch) => n + (WIDE.test(ch) ? 2 : 1), 0)
 
 function clip(text: string, width: number) {
@@ -177,7 +186,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'agent-zoo',
-      description: 'Show the sub-agents and teammates of this session in a pane (compact: one line each; big / small: robot size; clear: drop finished ones)',
+      description: 'Show the sub-agents and teammates of this session in a pane (compact: one line each; big / small: robot size; chat: show or hide the team chat; clear: drop finished ones)',
     })
     const stored = await $.store.get('size').catch(() => undefined)
     if (stored === 'big' || stored === 'small') await update($, view, v => ({ ...v, size: stored }))
@@ -201,6 +210,10 @@ export const register: Register = on => {
       await update($, view, v => ({ ...v, size: arg, compact: false }))
       await $.store.set('size', arg)
       return { text: `Agent Zoo: ${arg} robots.` }
+    }
+    if (arg === 'chat') {
+      const { chatHidden } = await update($, view, v => ({ ...v, chatHidden: !v.chatHidden }))
+      return { text: `Agent Zoo: team chat ${chatHidden ? 'hidden' : 'shown'}.` }
     }
     if (arg === 'compact') {
       const { compact } = await update($, view, v => ({ ...v, compact: !v.compact }))
@@ -253,6 +266,25 @@ export const register: Register = on => {
     return result
   }).catch(($, e, next) => next(e))
 
+  // Every message between agents, the lead's included, for the team chat.
+  on('tool.call', { tool: 'SendMessage' }, async ($, e, next) => {
+    const result = await next(e)
+    const text = typeof e.message === 'string' ? e.message.trim() : ''
+    if (text) {
+      const message: ChatMessage = {
+        id: e.tool_use_id,
+        from: e.agentId ?? 'main',
+        to: typeof e.to === 'string' ? e.to : JSON.stringify(e.to ?? ''),
+        text: text.slice(0, 4000),
+        at: await $.clock.now(),
+        failed: !!(result.deny || result.isError),
+      }
+      await update($, chat, list => [...list, message].slice(-CHAT_KEPT))
+    }
+
+    return result
+  }).catch(($, e, next) => next(e))
+
   // A teammate woken by a message runs again.
   on('turn.start', async ($, e, next) => {
     if (e.agentId) await patch($, e.agentId, card => (card.teammateId && card.status === 'waiting' ? { ...card, status: 'running' } : card))
@@ -287,6 +319,7 @@ export const register: Register = on => {
     const frame = await read($, tick)
     const open = await read($, detail)
     const v = await read($, view)
+    const said = await read($, chat)
     const compact = v.compact
     // A view kept from before sizes existed has none.
     const size = v.size ?? 'small'
@@ -330,6 +363,95 @@ export const register: Register = on => {
       </Box>
     )
 
+    // Names as the chat writes them: the lead, a teammate's name, or the address itself.
+    const nameOf = (id: string) => {
+      if (id === 'main') return 'lead'
+      const card = list.find(one => one.id === id)
+      return card ? card.name ?? card.teammateId?.split('@')[0] ?? card.type : id.slice(0, 8)
+    }
+    const addressee = (to: string) => {
+      if (to === 'main') return 'lead'
+      if (to === '*') return '全體'
+      const card = list.find(one => one.id === to || one.name === to || one.teammateId === to || one.teammateId?.split('@')[0] === to)
+      return card ? nameOf(card.id) : to
+    }
+    const face = (name: string) =>
+      name === 'lead' ? LEAD_FACE : FACES[[...name].reduce((n, ch) => (n * 31 + ch.charCodeAt(0)) % 9973, 7) % FACES.length]!
+    const voice = (name: string) =>
+      name === 'lead' ? 'claude' : VOICES[[...name].reduce((n, ch) => n + ch.charCodeAt(0), 0) % VOICES.length]!
+    const hhmm = (at: number) => {
+      const d = new Date(at)
+      return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+    }
+
+    // The team chat, as a messenger draws it: the lead's on the right, the rest on the left.
+    const chatBox = () => {
+      if (said.length === 0) return null
+      const chatHead = (
+        <Box flexDirection="row" justifyContent="space-between" marginTop={1}>
+          <Text>
+            <Text bold color="claude">TEAM CHAT</Text>
+            <Text dimColor>{`  ${said.length} 則`}</Text>
+          </Text>
+          <Box flexDirection="row" gap={1}>
+            <Button key="chat-toggle" hotkey="c" plain label={v.chatHidden ? '▸ 顯示' : '▾ 隱藏'}
+              onPress={() => void update($, view, now => ({ ...now, chatHidden: !now.chatHidden }))} />
+            {!v.chatHidden && (
+              <Button key="chat-clear" plain dimColor label="清空"
+                onPress={() => void update($, chat, () => [])} />
+            )}
+          </Box>
+        </Box>
+      )
+      if (v.chatHidden) return <Box flexDirection="column">{chatHead}</Box>
+      const shown = v.chatAll ? said : said.slice(-CHAT_SHOWN)
+      const widest = Math.max(12, Math.floor(W * 0.8))
+      return (
+        <Box flexDirection="column">
+          {chatHead}
+          {rule}
+          {said.length > shown.length && (
+            <Button key="chat-all" plain dimColor label={`  ▴ 較早的 ${said.length - shown.length} 則`}
+              onPress={() => void update($, view, now => ({ ...now, chatAll: true }))} />
+          )}
+          {v.chatAll && said.length > CHAT_SHOWN && (
+            <Button key="chat-recent" plain dimColor label="  ▾ 只看最近幾則"
+              onPress={() => void update($, view, now => ({ ...now, chatAll: false }))} />
+          )}
+          {shown.map(m => {
+            const from = nameOf(m.from)
+            const to = addressee(m.to)
+            const mine = m.from === 'main'
+            const isOpen = v.chatOpen === m.id
+            const inner = widest - 4
+            const lines = m.text.split('\n').map(line => line.trimEnd()).filter(Boolean)
+            const body = isOpen ? lines : lines.slice(0, 3)
+            const longest = Math.max(...body.map(line => Math.min(cells(line), inner)), cells(`${face(from)} ${from} → ${to}`) - 2)
+            const width = Math.min(widest, Math.max(10, longest + 4))
+            const cut = !isOpen && (lines.length > body.length || body.some(line => cells(line) > inner))
+            return (
+              <Box key={`chat-${m.id}`} flexDirection="row" justifyContent={mine ? 'flex-end' : 'flex-start'} marginTop={1}>
+                <Box flexDirection="column" width={width}>
+                  <Button key={`say-${m.id}`} plain onPress={() => void update($, view, now => ({ ...now, chatOpen: isOpen ? null : m.id }))}>
+                    <Text>{`${face(from)} `}</Text>
+                    <Text bold color={voice(from)}>{from}</Text>
+                    <Text dimColor>{` → ${to}  ${hhmm(m.at)}`}</Text>
+                    {m.failed && <Text color="error">{' ✕ 沒送出'}</Text>}
+                  </Button>
+                  <Box flexDirection="column" borderStyle="round" borderColor={voice(from)} paddingX={1}>
+                    {body.map((line, i) => (
+                      <Text key={`l-${i}`} wrap="wrap">{isOpen ? line : clip(line, width - 4)}</Text>
+                    ))}
+                    {cut && <Text dimColor>{'… 點名字看全文'}</Text>}
+                  </Box>
+                </Box>
+              </Box>
+            )
+          })}
+        </Box>
+      )
+    }
+
     if (list.length === 0) {
       return (
         <Box flexDirection="column">
@@ -341,6 +463,7 @@ export const register: Register = on => {
               <Text dimColor>有 agent 被叫起來時，會出現在這裡。</Text>
             </Box>
           </Box>
+          {chatBox()}
         </Box>
       )
     }
@@ -441,6 +564,7 @@ export const register: Register = on => {
           {visible.map(([card, depth]) => row(card, depth))}
           {ordered.length > visible.length && <Text dimColor>{`+${ordered.length - visible.length} more`}</Text>}
           <Text dimColor>{clip('點一列看進度 · l 切換圖示', W)}</Text>
+          {chatBox()}
         </Box>
       )
     }
@@ -491,6 +615,7 @@ export const register: Register = on => {
         })}
         {rule}
         {list.length > shown.length && <Text dimColor>{`+${list.length - shown.length} more · l 切換成清單`}</Text>}
+        {chatBox()}
       </Box>
     )
   })

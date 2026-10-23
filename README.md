@@ -66,7 +66,9 @@ Every sub-agent is a shaded 3D robot (half-block pixels in the terminal; Windows
 
 Robots are 10×5 cells by default; `/agent-zoo big` brings back the original 18×9 ones (`/agent-zoo small` switches back; the choice is remembered).
 
-Commands: `/agent-zoo` opens the pane, `/agent-zoo compact` toggles list mode, `/agent-zoo big` / `small` sets the robot size, `/agent-zoo clear` drops finished agents.
+**Team chat**: with agent teams, the messages the lead and its teammates send each other with SendMessage show under the zoo as a messenger would draw them, in TEAM CHAT: the lead on the right, teammates on the left, each in a colour and an animal of its own picked by name (the lead wears 👑), every bubble headed with who wrote to whom and when; press a name for the whole message, `c` to hide or show it, Clear to empty it. Only agents running in this Claude Code process are seen (a teammate in a tmux split pane is another process).
+
+Commands: `/agent-zoo` opens the pane, `/agent-zoo compact` toggles list mode, `/agent-zoo chat` hides or shows the team chat, `/agent-zoo big` / `small` sets the robot size, `/agent-zoo clear` drops finished agents.
 
 ## todo-history
 

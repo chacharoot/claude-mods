@@ -64,7 +64,9 @@ Claude Code 的三個 mod（hooks-module plugin），都會在對話旁邊開一
 
 小機器人預設是 10×5 格；想要原本 18×9 的大隻，用 `/agent-zoo big`（`/agent-zoo small` 換回來，會記住）。
 
-指令：`/agent-zoo` 打開 panel，`/agent-zoo compact` 切換清單模式，`/agent-zoo big`／`small` 切換機器人大小，`/agent-zoo clear` 清掉已完成的。
+**團隊對話**：用 agent teams 時，lead 和 teammate 之間用 SendMessage 傳的訊息會像通訊軟體一樣顯示在 zoo 下方的「TEAM CHAT」：lead 在右、teammate 在左，每個人有自己的顏色和一隻依名字挑的動物頭像（lead 是 👑），氣泡上標「誰 → 誰」和時間；點名字看全文，`c` 隱藏／顯示，「清空」清掉紀錄。只記得到在這個 Claude Code 程序裡跑的 agent（tmux 分割窗格的 teammate 是另一個程序，看不到）。
+
+指令：`/agent-zoo` 打開 panel，`/agent-zoo compact` 切換清單模式，`/agent-zoo chat` 隱藏／顯示團隊對話，`/agent-zoo big`／`small` 切換機器人大小，`/agent-zoo clear` 清掉已完成的。
 
 ## todo-history
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## agent-zoo 0.4.0
+- **團隊對話（TEAM CHAT）**：agent teams 的 lead 和 teammate 互相用 SendMessage 傳的訊息，像通訊軟體一樣顯示在 zoo 下方：lead 在右、teammate 在左，每個人固定一個顏色，氣泡上標「誰 → 誰」和時間，沒送出的標 ✕。每個人名字前有一隻依名字挑的動物 emoji（同一個名字永遠同一隻），lead 是 👑。預設顯示最近 6 則（保留 60 則），點名字看全文，`c` 或 `/agent-zoo chat` 隱藏／顯示，「清空」清掉紀錄。
+- 只看得到在同一個 Claude Code 程序裡跑的 agent；tmux 分割窗格的 teammate 是另一個程序，不會出現。
+
 ## session-manager 0.3.1
 - **修正（Windows）**：PowerShell 版 scanner 會把「只有一段文字」的訊息丟掉（PowerShell 會把只有一個元素的陣列自動拆開）。結果是：搜尋內文只找得到你說的話、找不到 Claude 的回覆；「預覽對話」把整段對話併成一則；部分 prompt 沒被算到。這個問題從 0.2.1 的 PowerShell 版就存在。
 

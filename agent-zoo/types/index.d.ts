@@ -34,15 +34,31 @@ export type Detail = {
   error?: string
 }
 
+// One SendMessage between agents: `from` the sender's agent id, or "main" for the
+// lead; `to` the address as written (a teammate's name, "main", an agent id).
+export type ChatMessage = {
+  id: string
+  from: string
+  to: string
+  text: string
+  at: number
+  failed?: boolean
+}
+
 export type ZooView = {
   // Compact draws one line per agent, nested under its parent, so a team fits.
   compact: boolean
   // The robots' size: small (10 px, the default) or big (18 px).
   size: 'small' | 'big'
+  // The team chat under the zoo: hidden, every kept message or the last few, and
+  // the one message drawn whole. Absent from views kept before the chat existed.
+  chatHidden?: boolean
+  chatAll?: boolean
+  chatOpen?: string | null
 }
 
 declare module 'claude-code' {
   interface PluginState {
-    'agent-zoo': { agents: AgentCard[]; tick: number; detail: Detail | null; view: ZooView }
+    'agent-zoo': { agents: AgentCard[]; tick: number; detail: Detail | null; view: ZooView; chat: ChatMessage[] }
   }
 }

@@ -144,3 +144,41 @@ test('robots are small by default, and /agent-zoo big draws them big', async ($,
   rasters.push((await size())!)
   expect(rasters).toEqual([{ columns: 10, rows: 5 }, { columns: 18, rows: 9 }])
 })
+
+test('messages between the lead and its teammates show as a chat under the zoo', async ($, on) => {
+  on('command.register', () => ({ value: { command: 'agent-zoo' } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('agent.spawn', () => ({ model: 'opus', agentId: 't1', teammateId: 'scout@crew' }))
+  on('agent.list', () => ({ value: [] }))
+  // A message to nobody the team has fails, as the engine would refuse it.
+  on('tool.call', (_, e) => (e.tool === 'SendMessage' && e.to === 'ghost' ? { result: {}, isError: true } : { result: {} }))
+  mock.clock(on)
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.agent.spawn({ ...SPAWN, name: 'scout', isTeammate: true } as AgentSpawnInput)
+
+  const send = (to: string, message: string, agentId?: string) =>
+    ({ tool: 'SendMessage' as const, to, message, summary: 's', ...(agentId ? { agentId } : {}) })
+  await $.tool.call(send('scout', 'Find where the config is loaded.\nThen report back.'))
+  await $.tool.call(send('main', 'Found it in src/config.ts.', 't1'))
+  await $.tool.call(send('ghost', 'Anyone there?'))
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /TEAM CHAT/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /3 則/ })).toBeDefined()
+  // Who wrote to whom, by name: the lead is "lead", the teammate its own name.
+  const heads = (await ui.findAll({ type: 'Button' })).filter(b => b.key?.startsWith('say-')).map(b => b.text)
+  expect(heads).toHaveLength(3)
+  expect(heads[0]).toMatch(/^👑 lead → scout/)
+  expect(heads[1]).toMatch(/^\S+ scout → lead/)
+  expect(heads[2]).toMatch(/lead → ghost.*沒送出/)
+  expect(await ui.find({ type: 'Text', text: /Found it in src\/config\.ts\./ })).toBeDefined()
+
+  await ui.press({ key: 'chat-toggle' })
+  expect(await ui.find({ type: 'Text', text: /Found it/ })).toBeUndefined()
+  await ui.press({ key: 'chat-toggle' })
+  await ui.press({ key: 'chat-clear' })
+  expect(await ui.find({ type: 'Text', text: /TEAM CHAT/ })).toBeUndefined()
+  await ui.unmount()
+})
